@@ -1,0 +1,421 @@
+:root {
+  color-scheme: light;
+  --bg: #f7f7f4;
+  --panel: #ffffff;
+  --ink: #0b0b0b;
+  --muted: #747474;
+  --line: #deded8;
+  --soft: #eeeeea;
+  --danger: #9d1d1d;
+  --income: #166534;
+  --shadow: 0 20px 60px rgba(0, 0, 0, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  letter-spacing: 0;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+.shell {
+  width: min(100%, 760px);
+  margin: 0 auto;
+  padding: max(18px, env(safe-area-inset-top)) 16px max(28px, env(safe-area-inset-bottom));
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 0 20px;
+}
+
+.eyebrow {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: 34px;
+  line-height: 1;
+  font-weight: 800;
+}
+
+h2 {
+  font-size: 17px;
+}
+
+.icon-button {
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--ink);
+  border-radius: 50%;
+  background: var(--ink);
+  color: white;
+  font-size: 28px;
+  line-height: 1;
+}
+
+.summary {
+  display: grid;
+  grid-template-columns: 1.35fr 1fr 1fr;
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--ink);
+  border-radius: 8px;
+  background: var(--ink);
+  box-shadow: var(--shadow);
+}
+
+.summary div {
+  min-width: 0;
+  padding: 16px 12px;
+  background: var(--panel);
+}
+
+.summary p {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.summary strong {
+  display: block;
+  margin-top: 8px;
+  font-size: clamp(18px, 5vw, 30px);
+  line-height: 1.05;
+  overflow-wrap: anywhere;
+}
+
+.tabs {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin: 18px 0;
+}
+
+.tab,
+.primary,
+.text-button,
+.danger,
+.secondary-file {
+  min-height: 44px;
+  border-radius: 8px;
+  border: 1px solid var(--ink);
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.tab.is-active,
+.primary {
+  background: var(--ink);
+  color: white;
+}
+
+.danger {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.view {
+  display: none;
+}
+
+.view.is-active {
+  display: block;
+}
+
+.entry-form,
+.import-box,
+.backup-grid {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.entry-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+label {
+  display: grid;
+  gap: 6px;
+}
+
+label span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  padding: 10px 12px;
+  outline: none;
+}
+
+textarea {
+  min-height: 132px;
+  resize: vertical;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--ink);
+}
+
+.wide {
+  grid-column: 1 / -1;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 22px 0 10px;
+}
+
+.text-button {
+  min-height: 36px;
+  padding: 0 12px;
+  border-color: var(--line);
+  color: var(--muted);
+}
+
+.filters {
+  display: grid;
+  grid-template-columns: 1fr 150px;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.records,
+.rank-list {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.record {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 66px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.record-main,
+.record-side {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.record-main strong,
+.record-main span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.record-main span,
+.record-side small,
+.empty,
+.hint {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.record-side {
+  text-align: right;
+}
+
+.record-side b.expense {
+  color: var(--ink);
+}
+
+.record-side b.income {
+  color: var(--income);
+}
+
+.delete-button {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--soft);
+  color: var(--muted);
+  font-size: 20px;
+}
+
+.check-wrap {
+  display: block;
+}
+
+.check-wrap input {
+  width: 22px;
+  min-height: 22px;
+}
+
+.empty {
+  display: none;
+  padding: 22px 6px;
+  text-align: center;
+}
+
+.empty.is-visible {
+  display: block;
+}
+
+.dropzone {
+  display: grid;
+  gap: 6px;
+  min-height: 96px;
+  place-items: center;
+  padding: 18px;
+  border: 1px dashed var(--ink);
+  border-radius: 8px;
+  text-align: center;
+}
+
+.dropzone span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.chart {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.bar {
+  display: grid;
+  grid-template-columns: 86px 1fr 78px;
+  align-items: center;
+  gap: 10px;
+  min-height: 28px;
+  font-size: 13px;
+}
+
+.bar-track {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--soft);
+}
+
+.bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--ink);
+}
+
+.rank-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.secondary-file {
+  display: grid;
+  place-items: center;
+  text-align: center;
+}
+
+.secondary-file input {
+  display: none;
+}
+
+.hint {
+  margin-top: 12px;
+  line-height: 1.7;
+}
+
+@media (max-width: 560px) {
+  .shell {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .summary {
+    grid-template-columns: 1fr;
+  }
+
+  .entry-form,
+  .filters {
+    grid-template-columns: 1fr;
+  }
+
+  .tabs {
+    gap: 4px;
+  }
+
+  .tab {
+    padding: 0 4px;
+  }
+
+  .record {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .record-side {
+    grid-column: 2 / 3;
+    grid-row: 2;
+    text-align: left;
+  }
+
+  .delete-button {
+    grid-column: 3;
+    grid-row: 1 / 3;
+  }
+}

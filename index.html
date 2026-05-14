@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b0b0b" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="墨账" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>墨账</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Personal Ledger</p>
+          <h1>墨账</h1>
+        </div>
+        <button class="icon-button" id="installButton" type="button" hidden aria-label="安装到主屏幕">
+          <span aria-hidden="true">＋</span>
+        </button>
+      </header>
+
+      <section class="summary" aria-label="本月汇总">
+        <div>
+          <p>本月结余</p>
+          <strong id="monthBalance">¥0.00</strong>
+        </div>
+        <div>
+          <p>支出</p>
+          <strong id="monthExpense">¥0.00</strong>
+        </div>
+        <div>
+          <p>收入</p>
+          <strong id="monthIncome">¥0.00</strong>
+        </div>
+      </section>
+
+      <nav class="tabs" aria-label="页面切换">
+        <button class="tab is-active" data-view="records" type="button">流水</button>
+        <button class="tab" data-view="import" type="button">导入</button>
+        <button class="tab" data-view="stats" type="button">统计</button>
+        <button class="tab" data-view="settings" type="button">备份</button>
+      </nav>
+
+      <section class="view is-active" id="recordsView">
+        <form class="entry-form" id="entryForm">
+          <label>
+            <span>类型</span>
+            <select id="typeInput">
+              <option value="expense">支出</option>
+              <option value="income">收入</option>
+            </select>
+          </label>
+          <label>
+            <span>金额</span>
+            <input id="amountInput" inputmode="decimal" placeholder="0.00" required />
+          </label>
+          <label>
+            <span>分类</span>
+            <input id="categoryInput" placeholder="餐饮 / 交通 / 工资" required />
+          </label>
+          <label>
+            <span>日期</span>
+            <input id="dateInput" type="date" required />
+          </label>
+          <label class="wide">
+            <span>备注</span>
+            <input id="noteInput" placeholder="商户、平台或说明" />
+          </label>
+          <button class="primary wide" type="submit">记一笔</button>
+        </form>
+
+        <div class="section-head">
+          <h2>最近记录</h2>
+          <button class="text-button" id="clearFiltersButton" type="button">清除筛选</button>
+        </div>
+        <div class="filters">
+          <input id="searchInput" placeholder="搜索备注或分类" />
+          <input id="monthInput" type="month" />
+        </div>
+        <ol class="records" id="recordsList"></ol>
+        <p class="empty" id="recordsEmpty">还没有记录，先手动记一笔或导入账单。</p>
+      </section>
+
+      <section class="view" id="importView">
+        <div class="import-box">
+          <input id="fileInput" type="file" accept=".csv,.txt,.tsv,text/csv,text/plain" />
+          <div class="dropzone" id="dropzone">
+            <strong>选择或拖入账单文件</strong>
+            <span>支持支付宝、微信、银行 CSV/TXT 的常见字段；导入前可预览和取消勾选。</span>
+          </div>
+          <textarea id="pasteInput" rows="7" placeholder="也可以直接粘贴账单文本，每行一条流水"></textarea>
+          <button class="primary" id="parseButton" type="button">解析账单</button>
+        </div>
+
+        <div class="section-head">
+          <h2>待导入</h2>
+          <button class="text-button" id="importSelectedButton" type="button" disabled>导入选中</button>
+        </div>
+        <ol class="records preview" id="previewList"></ol>
+        <p class="empty" id="previewEmpty">解析后会在这里显示自动识别结果。</p>
+      </section>
+
+      <section class="view" id="statsView">
+        <div class="chart" id="categoryChart"></div>
+        <div class="section-head">
+          <h2>分类排行</h2>
+        </div>
+        <ol class="rank-list" id="rankList"></ol>
+        <p class="empty" id="statsEmpty">本月还没有支出数据。</p>
+      </section>
+
+      <section class="view" id="settingsView">
+        <div class="backup-grid">
+          <button class="primary" id="exportButton" type="button">导出 JSON 备份</button>
+          <label class="secondary-file">
+            <span>导入 JSON 备份</span>
+            <input id="backupInput" type="file" accept="application/json,.json" />
+          </label>
+          <button class="danger" id="wipeButton" type="button">清空本地数据</button>
+        </div>
+        <p class="hint">数据默认保存在当前浏览器本地。部署到 HTTPS 后，可在 iPhone Safari 中添加到主屏幕离线使用。</p>
+      </section>
+    </main>
+
+    <template id="recordTemplate">
+      <li class="record">
+        <label class="check-wrap" hidden>
+          <input type="checkbox" checked />
+        </label>
+        <div class="record-main">
+          <strong></strong>
+          <span></span>
+        </div>
+        <div class="record-side">
+          <b></b>
+          <small></small>
+        </div>
+        <button class="delete-button" type="button" aria-label="删除记录">×</button>
+      </li>
+    </template>
+
+    <script src="app.js" defer></script>
+  </body>
+</html>
