@@ -127,8 +127,7 @@ function bindEvents() {
   els.fileInput.addEventListener("change", async () => {
     const file = els.fileInput.files[0];
     if (!file) return;
-    els.pasteInput.value = await readBillFile(file);
-    parseImportText();
+    await loadImportFile(file);
   });
 
   els.dropzone.addEventListener("click", () => els.fileInput.click());
@@ -142,8 +141,7 @@ function bindEvents() {
     els.dropzone.classList.remove("is-dragging");
     const file = event.dataTransfer.files[0];
     if (!file) return;
-    els.pasteInput.value = await readBillFile(file);
-    parseImportText();
+    await loadImportFile(file);
   });
 
   els.parseButton.addEventListener("click", parseImportText);
@@ -274,8 +272,21 @@ function parseImportText() {
   renderPreview();
 }
 
+async function loadImportFile(file) {
+  try {
+    els.pasteInput.value = await readBillFile(file);
+    parseImportText();
+  } catch (error) {
+    alert(error.message || "账单文件读取失败。");
+  }
+}
+
 async function readBillFile(file) {
   const buffer = await file.arrayBuffer();
+  if (isXlsxFile(file, buffer)) {
+    return xlsxRowsToText(await readXlsxRows(buffer));
+  }
+
   const decoders = ["utf-8", "gb18030", "gbk", "big5"];
   const candidates = decoders
     .map((encoding) => decodeBuffer(buffer, encoding))
@@ -284,6 +295,186 @@ async function readBillFile(file) {
     .sort((a, b) => b.score - a.score);
 
   return candidates[0]?.text || await file.text();
+}
+
+function isXlsxFile(file, buffer) {
+  const bytes = new Uint8Array(buffer, 0, Math.min(4, buffer.byteLength));
+  const isZip = bytes[0] === 0x50 && bytes[1] === 0x4b;
+  return isZip || /\.xlsx$/i.test(file.name);
+}
+
+async function readXlsxRows(buffer) {
+  const entries = parseZipDirectory(buffer);
+  const sharedStringsXml = await readZipText(buffer, entries.get("xl/sharedStrings.xml"));
+  const workbookRelsXml = await readZipText(buffer, entries.get("xl/_rels/workbook.xml.rels"));
+  const sheetPath = findFirstSheetPath(workbookRelsXml, entries);
+  const sheetXml = await readZipText(buffer, entries.get(sheetPath));
+  const sharedStrings = parseSharedStrings(sharedStringsXml);
+  const rows = parseSheetRows(sheetXml, sharedStrings);
+  return normalizeXlsxRows(rows);
+}
+
+function parseZipDirectory(buffer) {
+  const view = new DataView(buffer);
+  const bytes = new Uint8Array(buffer);
+  let eocd = -1;
+
+  for (let index = bytes.length - 22; index >= Math.max(0, bytes.length - 66000); index -= 1) {
+    if (view.getUint32(index, true) === 0x06054b50) {
+      eocd = index;
+      break;
+    }
+  }
+
+  if (eocd < 0) throw new Error("无法读取 Excel 文件结构。");
+
+  const entries = new Map();
+  const entryCount = view.getUint16(eocd + 10, true);
+  let offset = view.getUint32(eocd + 16, true);
+
+  for (let entryIndex = 0; entryIndex < entryCount; entryIndex += 1) {
+    if (view.getUint32(offset, true) !== 0x02014b50) break;
+    const method = view.getUint16(offset + 10, true);
+    const compressedSize = view.getUint32(offset + 20, true);
+    const uncompressedSize = view.getUint32(offset + 24, true);
+    const fileNameLength = view.getUint16(offset + 28, true);
+    const extraLength = view.getUint16(offset + 30, true);
+    const commentLength = view.getUint16(offset + 32, true);
+    const localHeaderOffset = view.getUint32(offset + 42, true);
+    const nameBytes = bytes.slice(offset + 46, offset + 46 + fileNameLength);
+    const name = new TextDecoder("utf-8").decode(nameBytes);
+
+    entries.set(name, { name, method, compressedSize, uncompressedSize, localHeaderOffset });
+    offset += 46 + fileNameLength + extraLength + commentLength;
+  }
+
+  return entries;
+}
+
+async function readZipText(buffer, entry) {
+  if (!entry) throw new Error("Excel 文件缺少必要工作表。");
+  const bytes = new Uint8Array(buffer);
+  const view = new DataView(buffer);
+  const offset = entry.localHeaderOffset;
+
+  if (view.getUint32(offset, true) !== 0x04034b50) throw new Error("Excel 文件内容损坏。");
+
+  const fileNameLength = view.getUint16(offset + 26, true);
+  const extraLength = view.getUint16(offset + 28, true);
+  const dataStart = offset + 30 + fileNameLength + extraLength;
+  const data = bytes.slice(dataStart, dataStart + entry.compressedSize);
+
+  if (entry.method === 0) return new TextDecoder("utf-8").decode(data);
+  if (entry.method !== 8) throw new Error("暂不支持这个 Excel 压缩格式。");
+  if (!("DecompressionStream" in window)) throw new Error("当前浏览器不支持直接读取 XLSX，请先另存为 CSV 后导入。");
+
+  const inflated = await inflateRaw(data);
+  return new TextDecoder("utf-8").decode(inflated);
+}
+
+async function inflateRaw(data) {
+  const formats = ["deflate-raw", "deflate"];
+  let lastError;
+
+  for (const format of formats) {
+    try {
+      const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream(format));
+      return await new Response(stream).arrayBuffer();
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError || new Error("Excel 解压失败。");
+}
+
+function findFirstSheetPath(workbookRelsXml, entries) {
+  const fallback = [...entries.keys()].find((name) => /^xl\/worksheets\/sheet\d+\.xml$/.test(name));
+  if (!workbookRelsXml) return fallback;
+
+  const doc = new DOMParser().parseFromString(workbookRelsXml, "application/xml");
+  const rel = [...doc.querySelectorAll("Relationship")].find((item) =>
+    /worksheet/.test(item.getAttribute("Type") || ""),
+  );
+  const target = rel?.getAttribute("Target")?.replace(/^\/+/, "");
+  if (!target) return fallback;
+  return target.startsWith("xl/") ? target : `xl/${target}`;
+}
+
+function parseSharedStrings(xml) {
+  if (!xml) return [];
+  const doc = new DOMParser().parseFromString(xml, "application/xml");
+  return [...doc.querySelectorAll("si")].map((item) =>
+    [...item.querySelectorAll("t")].map((textNode) => textNode.textContent || "").join(""),
+  );
+}
+
+function parseSheetRows(xml, sharedStrings) {
+  const doc = new DOMParser().parseFromString(xml, "application/xml");
+  return [...doc.querySelectorAll("sheetData row")].map((row) => {
+    const cells = [];
+    row.querySelectorAll("c").forEach((cell) => {
+      const ref = cell.getAttribute("r") || "";
+      const column = columnNameToIndex(ref.replace(/\d/g, ""));
+      cells[column] = readCellValue(cell, sharedStrings);
+    });
+    return cells.map((value) => value ?? "");
+  });
+}
+
+function readCellValue(cell, sharedStrings) {
+  const type = cell.getAttribute("t");
+  if (type === "s") {
+    const index = Number(cell.querySelector("v")?.textContent || 0);
+    return sharedStrings[index] || "";
+  }
+  if (type === "inlineStr") {
+    return [...cell.querySelectorAll("t")].map((node) => node.textContent || "").join("");
+  }
+  return cell.querySelector("v")?.textContent || "";
+}
+
+function normalizeXlsxRows(rows) {
+  const headerIndex = findHeaderRow(rows);
+  if (headerIndex < 0) return rows;
+
+  const header = rows[headerIndex].map(normalizeHeader);
+  const indexes = inferIndexes(header);
+  return rows.map((row, index) => {
+    if (index <= headerIndex || indexes.date == null) return row;
+    const next = [...row];
+    next[indexes.date] = normalizeExcelDate(next[indexes.date]);
+    return next;
+  });
+}
+
+function xlsxRowsToText(rows) {
+  return rows.map((row) => row.map(csvEscape).join(",")).join("\n");
+}
+
+function csvEscape(value = "") {
+  const text = String(value);
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function columnNameToIndex(name) {
+  return name
+    .toUpperCase()
+    .split("")
+    .reduce((total, char) => total * 26 + char.charCodeAt(0) - 64, 0) - 1;
+}
+
+function normalizeExcelDate(value) {
+  const text = cleanCell(value);
+  if (extractDate(text)) return text;
+  if (!/^\d+(?:\.\d+)?$/.test(text)) return text;
+
+  const serial = Number(text);
+  if (!Number.isFinite(serial) || serial < 20000 || serial > 80000) return text;
+  const utcDays = Math.floor(serial - 25569);
+  const utcValue = utcDays * 86400;
+  const date = new Date(utcValue * 1000);
+  return formatDate(date);
 }
 
 function decodeBuffer(buffer, encoding) {

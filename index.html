@@ -88,10 +88,10 @@
 
       <section class="view" id="importView">
         <div class="import-box">
-          <input id="fileInput" type="file" accept=".csv,.txt,.tsv,text/csv,text/plain" />
+          <input id="fileInput" type="file" accept=".csv,.txt,.tsv,.xlsx,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
           <div class="dropzone" id="dropzone">
             <strong>选择或拖入账单文件</strong>
-            <span>支持支付宝、微信、银行 CSV/TXT 的常见字段；导入前可预览和取消勾选。</span>
+            <span>支持支付宝、微信、银行 CSV/TXT/XLSX 的常见字段；导入前可预览和取消勾选。</span>
           </div>
           <textarea id="pasteInput" rows="7" placeholder="也可以直接粘贴账单文本，每行一条流水"></textarea>
           <button class="primary" id="parseButton" type="button">解析账单</button>
