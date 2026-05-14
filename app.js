@@ -59,7 +59,7 @@ const els = {
 };
 
 const categoryRules = [
-  ["餐饮", /餐|饭|咖啡|奶茶|麦当劳|肯德基|美团|饿了么|外卖|食|超市|便利店/],
+  ["餐饮", /餐|饭|咖啡|奶茶|麦当劳|肯德基|星巴克|瑞幸|喜茶|奈雪|蜜雪|美团|饿了么|外卖|食|超市|便利店/],
   ["交通", /地铁|公交|滴滴|打车|出租|高铁|铁路|航空|机票|加油|停车|高速/],
   ["购物", /淘宝|天猫|京东|拼多多|抖音|小红书|优衣库|商场|百货|快递/],
   ["住房", /房租|物业|水费|电费|燃气|宽带|话费/],
@@ -127,7 +127,7 @@ function bindEvents() {
   els.fileInput.addEventListener("change", async () => {
     const file = els.fileInput.files[0];
     if (!file) return;
-    els.pasteInput.value = await file.text();
+    els.pasteInput.value = await readBillFile(file);
     parseImportText();
   });
 
@@ -142,7 +142,7 @@ function bindEvents() {
     els.dropzone.classList.remove("is-dragging");
     const file = event.dataTransfer.files[0];
     if (!file) return;
-    els.pasteInput.value = await file.text();
+    els.pasteInput.value = await readBillFile(file);
     parseImportText();
   });
 
@@ -274,6 +274,44 @@ function parseImportText() {
   renderPreview();
 }
 
+async function readBillFile(file) {
+  const buffer = await file.arrayBuffer();
+  const decoders = ["utf-8", "gb18030", "gbk", "big5"];
+  const candidates = decoders
+    .map((encoding) => decodeBuffer(buffer, encoding))
+    .filter(Boolean)
+    .map((text) => ({ text, score: scoreBillText(text) }))
+    .sort((a, b) => b.score - a.score);
+
+  return candidates[0]?.text || await file.text();
+}
+
+function decodeBuffer(buffer, encoding) {
+  try {
+    return new TextDecoder(encoding).decode(buffer);
+  } catch {
+    return "";
+  }
+}
+
+function scoreBillText(text) {
+  const replacementPenalty = (text.match(/\uFFFD/g) || []).length * 10;
+  const keywordScore = [
+    /微信支付账单/,
+    /交易时间/,
+    /交易类型/,
+    /交易对方/,
+    /商品/,
+    /收\/支|收支|收入\/支出/,
+    /金额(?:\(元\))?/,
+    /支付方式/,
+    /当前状态/,
+    /交易单号/,
+  ].reduce((score, pattern) => score + (pattern.test(text) ? 20 : 0), 0);
+
+  return keywordScore - replacementPenalty;
+}
+
 function renderPreview() {
   els.previewList.replaceChildren(...state.preview.map((record) => createRecordNode(record, { preview: true })));
   els.previewEmpty.classList.toggle("is-visible", state.preview.length === 0);
@@ -297,8 +335,9 @@ function importSelectedPreview() {
 function parseBillText(text) {
   const lines = text
     .replace(/^\uFEFF/, "")
+    .replace(/\r/g, "\n")
     .split(/\r?\n/)
-    .map((line) => line.trim())
+    .map((line) => line.replace(/^\t+|\t+$/g, "").trim())
     .filter(Boolean);
 
   if (!lines.length) return [];
@@ -325,13 +364,13 @@ function parseBillText(text) {
 function parseRow(row, indexes) {
   const joined = row.join(" ");
   const date = extractDate(indexes.date != null ? row[indexes.date] : joined);
-  const amountValue = indexes.amount != null && row[indexes.amount] ? row[indexes.amount] : findAmountCell(row);
+  const amountValue = findAmountValue(row, indexes);
   const amount = normalizeAmount(amountValue);
 
   if (!date || !amount) return null;
 
   const typeText = [row[indexes.type], row[indexes.direction], joined].filter(Boolean).join(" ");
-  const type = inferType(typeText, amountValue);
+  const type = inferRowType(row, indexes, typeText, amountValue);
   const note = inferNote(row, indexes);
   const category = inferCategory(`${note} ${typeText}`);
 
@@ -343,11 +382,14 @@ function inferIndexes(header) {
   const incomeIndex = findIndex(header, /收入|入账|credit/);
   return {
     date: findIndex(header, /交易时间|创建时间|付款时间|日期|时间|date|time/),
-    amount: findIndex(header, /金额|人民币|amount|money/) ?? expenseIndex ?? incomeIndex,
-    type: findIndex(header, /收支|类型|交易类型|方向|type|direction/),
+    amount: findIndex(header, /^金额|金额\(元\)|交易金额|人民币|amount|money/) ?? expenseIndex ?? incomeIndex,
+    expense: expenseIndex,
+    income: incomeIndex,
+    type: findIndex(header, /^收\/支$|^收支$|类型|交易类型|方向|type|direction/),
     direction: findIndex(header, /借贷|收\/支|收入\/支出|方向/),
     merchant: findIndex(header, /交易对方|商户|对方|收款方|付款方|merchant|payee/),
-    note: findIndex(header, /商品|说明|备注|摘要|用途|note|memo|description/),
+    note: findIndex(header, /商品|商品名称|说明|备注|摘要|用途|note|memo|description/),
+    status: findIndex(header, /状态|当前状态|status/),
   };
 }
 
@@ -357,7 +399,7 @@ function findHeaderRow(rows) {
     const headerText = row.map(normalizeHeader).join("|");
     const hasDate = /date|time|日期|时间/.test(headerText);
     const hasMoney = /amount|money|金额|人民币|支出|收入/.test(headerText);
-    const hasContext = /type|note|memo|merchant|交易|商品|商户|对方|收\/支|收支/.test(headerText);
+    const hasContext = /type|note|memo|merchant|交易|商品|商户|对方|收\/支|收支|支付方式|当前状态/.test(headerText);
     return hasDate && hasMoney && hasContext;
   });
 }
@@ -374,9 +416,19 @@ function inferType(text, amountText = "") {
   return normalizeAmount(amountText) < 0 ? "expense" : "expense";
 }
 
+function inferRowType(row, indexes, typeText, amountValue) {
+  if (indexes.income != null && normalizeAmount(row[indexes.income])) return "income";
+  if (indexes.expense != null && normalizeAmount(row[indexes.expense])) return "expense";
+  return inferType(typeText, amountValue);
+}
+
 function inferNote(row, indexes) {
-  const candidates = [row[indexes.merchant], row[indexes.note]]
-    .concat(row.filter((cell) => cell && !extractDate(cell) && !normalizeAmount(cell)));
+  const candidates = [row[indexes.merchant], row[indexes.note]].concat(
+    row.filter((cell, index) => {
+      if (!cell || index === indexes.status || index === indexes.type || index === indexes.direction) return false;
+      return !extractDate(cell) && !normalizeAmount(cell) && !/支付成功|已全额退款|交易关闭|对方已收钱/.test(cell);
+    }),
+  );
   return cleanCell(candidates.find(Boolean) || "导入账单");
 }
 
@@ -388,17 +440,31 @@ function inferCategory(text) {
 
 function extractDate(text = "") {
   const normalized = cleanCell(text);
-  const match = normalized.match(/(20\d{2}|19\d{2})[/-年.](\d{1,2})[/-月.](\d{1,2})/);
+  const match = normalized.match(/(20\d{2}|19\d{2})[\/.\-年](\d{1,2})[\/.\-月](\d{1,2})/);
   if (!match) return "";
   const [, year, month, day] = match;
   return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+}
+
+function findAmountValue(row, indexes) {
+  const income = indexes.income != null ? normalizeAmount(row[indexes.income]) : 0;
+  const expense = indexes.expense != null ? normalizeAmount(row[indexes.expense]) : 0;
+  if (income) return row[indexes.income];
+  if (expense) return row[indexes.expense];
+  if (indexes.amount != null && row[indexes.amount]) return row[indexes.amount];
+  return findAmountCell(row);
 }
 
 function findAmountCell(row) {
   return (
     row.find((cell) => {
       const text = cleanCell(cell);
-      return !extractDate(text) && /[¥￥元+-]?\s*\d+(?:,\d{3})*(?:\.\d+)?/.test(text) && normalizeAmount(text);
+      return (
+        !extractDate(text) &&
+        !/^\d{12,}$/.test(text.replace(/\D/g, "")) &&
+        /[¥￥元+-]?\s*\d+(?:,\d{3})*(?:\.\d+)?/.test(text) &&
+        normalizeAmount(text)
+      );
     }) || ""
   );
 }
@@ -413,7 +479,7 @@ function normalizeAmount(value = "") {
 }
 
 function detectDelimiter(lines) {
-  const sample = lines.slice(0, 4).join("\n");
+  const sample = lines.slice(0, 30).join("\n");
   const candidates = [",", "\t", ";", "|"];
   return candidates.sort((a, b) => sample.split(b).length - sample.split(a).length)[0];
 }
@@ -446,7 +512,11 @@ function splitRow(line, delimiter) {
 }
 
 function cleanCell(value = "") {
-  return String(value).replace(/^"+|"+$/g, "").trim();
+  return String(value)
+    .replace(/^"+|"+$/g, "")
+    .replace(/^'+|'+$/g, "")
+    .replace(/^`+|`+$/g, "")
+    .trim();
 }
 
 function normalizeHeader(value = "") {
