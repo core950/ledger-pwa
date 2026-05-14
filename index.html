@@ -42,6 +42,7 @@
         <button class="tab is-active" data-view="records" type="button">流水</button>
         <button class="tab" data-view="import" type="button">导入</button>
         <button class="tab" data-view="stats" type="button">统计</button>
+        <button class="tab" data-view="sync" type="button">同步</button>
         <button class="tab" data-view="settings" type="button">备份</button>
       </nav>
 
@@ -113,6 +114,41 @@
         <p class="empty" id="statsEmpty">本月还没有支出数据。</p>
       </section>
 
+      <section class="view" id="syncView">
+        <div class="sync-status" id="syncStatus">未连接云同步</div>
+        <form class="entry-form" id="cloudConfigForm">
+          <label class="wide">
+            <span>Supabase Project URL</span>
+            <input id="supabaseUrlInput" placeholder="https://xxxx.supabase.co" autocomplete="off" />
+          </label>
+          <label class="wide">
+            <span>Supabase anon public key</span>
+            <input id="supabaseKeyInput" placeholder="eyJhbGciOi..." autocomplete="off" />
+          </label>
+          <button class="primary wide" type="submit">保存云配置</button>
+        </form>
+
+        <form class="entry-form sync-form" id="authForm">
+          <label class="wide">
+            <span>邮箱</span>
+            <input id="emailInput" type="email" placeholder="you@example.com" autocomplete="email" />
+          </label>
+          <label class="wide">
+            <span>密码</span>
+            <input id="passwordInput" type="password" placeholder="至少 6 位" autocomplete="current-password" />
+          </label>
+          <button class="primary" id="signInButton" type="button">登录</button>
+          <button class="secondary" id="signUpButton" type="button">注册</button>
+          <button class="secondary wide" id="signOutButton" type="button">退出登录</button>
+        </form>
+
+        <div class="backup-grid">
+          <button class="primary" id="syncNowButton" type="button">立即同步</button>
+          <button class="secondary" id="pullCloudButton" type="button">从云端恢复</button>
+        </div>
+        <p class="hint">长期使用建议开启云同步。数据会先保存在本机，再上传到你的 Supabase 数据库；离线记录会在下次联网后同步。</p>
+      </section>
+
       <section class="view" id="settingsView">
         <div class="backup-grid">
           <button class="primary" id="exportButton" type="button">导出 JSON 备份</button>
@@ -122,7 +158,7 @@
           </label>
           <button class="danger" id="wipeButton" type="button">清空本地数据</button>
         </div>
-        <p class="hint">数据默认保存在当前浏览器本地。部署到 HTTPS 后，可在 iPhone Safari 中添加到主屏幕离线使用。</p>
+        <p class="hint">即使开启云同步，也建议偶尔导出 JSON 备份，多一份自己握在手里的保险。</p>
       </section>
     </main>
 

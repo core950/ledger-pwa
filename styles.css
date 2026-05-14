@@ -114,13 +114,14 @@ h2 {
 
 .tabs {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 6px;
   margin: 18px 0;
 }
 
 .tab,
 .primary,
+.secondary,
 .text-button,
 .danger,
 .secondary-file {
@@ -135,6 +136,10 @@ h2 {
 .primary {
   background: var(--ink);
   color: white;
+}
+
+.secondary {
+  background: var(--panel);
 }
 
 .danger {
@@ -379,6 +384,31 @@ textarea:focus {
 .hint {
   margin-top: 12px;
   line-height: 1.7;
+}
+
+.sync-status {
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.sync-status.is-ok {
+  color: var(--income);
+  border-color: rgba(22, 101, 52, 0.35);
+}
+
+.sync-status.is-error {
+  color: var(--danger);
+  border-color: rgba(157, 29, 29, 0.35);
+}
+
+.sync-form {
+  margin-top: 10px;
 }
 
 @media (max-width: 560px) {

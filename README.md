@@ -6,6 +6,7 @@
 
 - 手动记录收入和支出
 - 导入 CSV、TSV、TXT 账单并自动识别日期、金额、收支、商户/备注
+- Supabase 云同步，适合长期使用和换机恢复
 - 按关键词和月份筛选流水
 - 本月收入、支出、结余汇总
 - 分类支出排行
@@ -45,3 +46,78 @@ http://你的电脑IP:5173
 - 交易对方、商户、商品、备注、摘要
 
 导入前会先显示预览，可以取消不想导入的记录。
+
+## 长期使用：Supabase 云同步
+
+只靠 iPhone Safari/PWA 的本地存储并不适合长期保存重要账本。建议开启 Supabase 云同步：本地仍可离线使用，联网后同步到你的 Supabase 数据库。
+
+### 1. 创建 Supabase 项目
+
+1. 打开 `https://supabase.com` 并登录。
+2. 创建一个新项目。
+3. 进入 `Project Settings` -> `API`。
+4. 复制：
+   - `Project URL`
+   - `anon public` key
+
+### 2. 创建数据表
+
+进入 Supabase 项目的 `SQL Editor`，粘贴并运行：
+
+```sql
+create table if not exists public.ledger_records (
+  id uuid primary key,
+  user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  type text not null check (type in ('income', 'expense')),
+  amount numeric(12, 2) not null,
+  category text not null default '未分类',
+  record_date date not null,
+  note text not null default '',
+  source text not null default '手动',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.ledger_records enable row level security;
+
+create policy "Users can read own ledger records"
+on public.ledger_records
+for select
+to authenticated
+using (auth.uid() = user_id);
+
+create policy "Users can insert own ledger records"
+on public.ledger_records
+for insert
+to authenticated
+with check (auth.uid() = user_id);
+
+create policy "Users can update own ledger records"
+on public.ledger_records
+for update
+to authenticated
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+create policy "Users can delete own ledger records"
+on public.ledger_records
+for delete
+to authenticated
+using (auth.uid() = user_id);
+
+create index if not exists ledger_records_user_date_idx
+on public.ledger_records (user_id, record_date desc);
+```
+
+如果重复运行提示 policy 已存在，可以忽略，或先删除同名 policy 后再运行。
+
+### 3. 在墨账里开启
+
+1. 打开应用的 `同步` 页。
+2. 填入 Supabase `Project URL` 和 `anon public key`。
+3. 点击 `保存云配置`。
+4. 输入邮箱和密码，点击 `注册`。
+5. 如果 Supabase 要求邮箱验证，先去邮箱确认，再回到应用点击 `登录`。
+6. 点击 `立即同步`。
+
+之后每次手动记账、导入账单、删除记录都会先保存到本地，并排队同步到云端。换手机时，重新打开应用、填同一套 Supabase 配置并登录，再点 `从云端恢复`。

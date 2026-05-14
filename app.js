@@ -1,7 +1,13 @@
 const STORAGE_KEY = "ink-ledger-records-v1";
+const CLOUD_CONFIG_KEY = "ink-ledger-cloud-config-v1";
+const CLOUD_SESSION_KEY = "ink-ledger-cloud-session-v1";
+const SYNC_QUEUE_KEY = "ink-ledger-sync-queue-v1";
 
 const state = {
   records: loadRecords(),
+  cloud: loadCloudConfig(),
+  session: loadCloudSession(),
+  syncQueue: loadSyncQueue(),
   preview: [],
   deferredPrompt: null,
 };
@@ -38,6 +44,18 @@ const els = {
   backupInput: document.querySelector("#backupInput"),
   wipeButton: document.querySelector("#wipeButton"),
   installButton: document.querySelector("#installButton"),
+  syncStatus: document.querySelector("#syncStatus"),
+  cloudConfigForm: document.querySelector("#cloudConfigForm"),
+  supabaseUrlInput: document.querySelector("#supabaseUrlInput"),
+  supabaseKeyInput: document.querySelector("#supabaseKeyInput"),
+  authForm: document.querySelector("#authForm"),
+  emailInput: document.querySelector("#emailInput"),
+  passwordInput: document.querySelector("#passwordInput"),
+  signInButton: document.querySelector("#signInButton"),
+  signUpButton: document.querySelector("#signUpButton"),
+  signOutButton: document.querySelector("#signOutButton"),
+  syncNowButton: document.querySelector("#syncNowButton"),
+  pullCloudButton: document.querySelector("#pullCloudButton"),
 };
 
 const categoryRules = [
@@ -58,6 +76,8 @@ function initialize() {
   const today = new Date();
   els.dateInput.value = formatDate(today);
   els.monthInput.value = formatMonth(today);
+  els.supabaseUrlInput.value = state.cloud.url || "";
+  els.supabaseKeyInput.value = state.cloud.anonKey || "";
   bindEvents();
   render();
 
@@ -87,7 +107,7 @@ function bindEvents() {
         source: "手动",
         createdAt: new Date().toISOString(),
       },
-    ]);
+    ], { sync: true });
 
     els.amountInput.value = "";
     els.noteInput.value = "";
@@ -131,6 +151,13 @@ function bindEvents() {
   els.exportButton.addEventListener("click", exportBackup);
   els.backupInput.addEventListener("change", importBackup);
   els.wipeButton.addEventListener("click", wipeData);
+  els.cloudConfigForm.addEventListener("submit", saveCloudConfig);
+  els.signInButton.addEventListener("click", () => signInOrUp("signin"));
+  els.signUpButton.addEventListener("click", () => signInOrUp("signup"));
+  els.signOutButton.addEventListener("click", signOut);
+  els.syncNowButton.addEventListener("click", () => syncNow({ pullFirst: false }));
+  els.pullCloudButton.addEventListener("click", () => syncNow({ pullFirst: true }));
+  window.addEventListener("online", () => syncNow({ silent: true }));
 
   window.addEventListener("beforeinstallprompt", (event) => {
     event.preventDefault();
@@ -152,9 +179,13 @@ function switchView(view) {
   els.views.forEach((panel) => panel.classList.toggle("is-active", panel.id === `${view}View`));
 }
 
-function addRecords(records) {
+function addRecords(records, options = {}) {
   state.records = dedupeRecords([...records, ...state.records]);
   saveRecords();
+  if (options.sync) {
+    queueUpserts(records);
+    syncNow({ silent: true });
+  }
   render();
 }
 
@@ -174,6 +205,7 @@ function render() {
   renderSummary();
   renderRecords();
   renderStats();
+  renderSyncStatus();
 }
 
 function renderSummary() {
@@ -227,6 +259,8 @@ function createRecordNode(record, options = {}) {
     deleteButton.addEventListener("click", () => {
       state.records = state.records.filter((item) => item.id !== record.id);
       saveRecords();
+      queueDelete(record.id);
+      syncNow({ silent: true });
       render();
     });
   }
@@ -252,7 +286,7 @@ function importSelectedPreview() {
   );
   const selected = state.preview.filter((record) => selectedIds.has(record.id));
   if (!selected.length) return;
-  addRecords(selected);
+  addRecords(selected, { sync: true });
   state.preview = [];
   els.pasteInput.value = "";
   els.fileInput.value = "";
@@ -470,14 +504,266 @@ async function importBackup() {
   if (!Array.isArray(data.records)) return;
   state.records = dedupeRecords([...data.records, ...state.records]);
   saveRecords();
+  queueUpserts(state.records);
+  syncNow({ silent: true });
   render();
 }
 
 function wipeData() {
-  if (!confirm("确定清空本地所有记账数据？")) return;
+  if (!confirm("确定清空本地所有记账数据？云端数据不会自动清空。")) return;
   state.records = [];
   saveRecords();
   render();
+}
+
+function loadCloudConfig() {
+  try {
+    return JSON.parse(localStorage.getItem(CLOUD_CONFIG_KEY)) || {};
+  } catch {
+    return {};
+  }
+}
+
+function saveCloudConfig(event) {
+  event.preventDefault();
+  state.cloud = {
+    url: normalizeSupabaseUrl(els.supabaseUrlInput.value),
+    anonKey: els.supabaseKeyInput.value.trim(),
+  };
+  localStorage.setItem(CLOUD_CONFIG_KEY, JSON.stringify(state.cloud));
+  setSyncStatus("云配置已保存。登录后即可同步。", "ok");
+}
+
+function loadCloudSession() {
+  try {
+    return JSON.parse(localStorage.getItem(CLOUD_SESSION_KEY)) || null;
+  } catch {
+    return null;
+  }
+}
+
+function saveCloudSession(session) {
+  state.session = session;
+  if (session) {
+    localStorage.setItem(CLOUD_SESSION_KEY, JSON.stringify(session));
+  } else {
+    localStorage.removeItem(CLOUD_SESSION_KEY);
+  }
+}
+
+function loadSyncQueue() {
+  try {
+    return JSON.parse(localStorage.getItem(SYNC_QUEUE_KEY)) || { upserts: [], deletes: [] };
+  } catch {
+    return { upserts: [], deletes: [] };
+  }
+}
+
+function saveSyncQueue() {
+  localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(state.syncQueue));
+}
+
+function queueUpserts(records) {
+  const byId = new Map(state.syncQueue.upserts.map((record) => [record.id, record]));
+  records.forEach((record) => byId.set(record.id, normalizeRecord(record)));
+  state.syncQueue.upserts = [...byId.values()];
+  state.syncQueue.deletes = state.syncQueue.deletes.filter((id) => !byId.has(id));
+  saveSyncQueue();
+}
+
+function queueDelete(id) {
+  state.syncQueue.upserts = state.syncQueue.upserts.filter((record) => record.id !== id);
+  if (!state.syncQueue.deletes.includes(id)) state.syncQueue.deletes.push(id);
+  saveSyncQueue();
+}
+
+async function signInOrUp(mode) {
+  try {
+    ensureCloudConfig();
+    const email = els.emailInput.value.trim();
+    const password = els.passwordInput.value;
+    if (!email || !password) throw new Error("请输入邮箱和密码。");
+
+    const path = mode === "signup" ? "/auth/v1/signup" : "/auth/v1/token?grant_type=password";
+    const session = await supabaseFetch(path, {
+      method: "POST",
+      auth: false,
+      body: { email, password },
+    });
+
+    if (!session.access_token && mode === "signup") {
+      setSyncStatus("注册成功。若 Supabase 开启了邮箱验证，请先去邮箱确认，再回来登录。", "ok");
+      return;
+    }
+
+    saveCloudSession(session);
+    setSyncStatus("已登录，正在同步。", "ok");
+    await syncNow({ pullFirst: true });
+  } catch (error) {
+    setSyncStatus(error.message, "error");
+  }
+}
+
+function signOut() {
+  saveCloudSession(null);
+  setSyncStatus("已退出登录。本地数据仍保留。", "");
+  renderSyncStatus();
+}
+
+async function syncNow(options = {}) {
+  if (!isCloudReady()) {
+    if (!options.silent) setSyncStatus("请先保存 Supabase 配置并登录。", "error");
+    return;
+  }
+
+  try {
+    if (options.pullFirst) await pullCloudRecords();
+    await flushDeletes();
+    await flushUpserts();
+    await pullCloudRecords();
+    setSyncStatus(`同步完成：${new Date().toLocaleString("zh-CN")}`, "ok", false);
+  } catch (error) {
+    if (!options.silent) setSyncStatus(error.message, "error", false);
+  }
+}
+
+async function flushUpserts() {
+  if (!state.syncQueue.upserts.length) return;
+  const rows = state.syncQueue.upserts.map(recordToRemote);
+  await supabaseFetch("/rest/v1/ledger_records?on_conflict=id", {
+    method: "POST",
+    body: rows,
+    prefer: "resolution=merge-duplicates",
+  });
+  state.syncQueue.upserts = [];
+  saveSyncQueue();
+}
+
+async function flushDeletes() {
+  if (!state.syncQueue.deletes.length) return;
+  const ids = [...state.syncQueue.deletes];
+  await Promise.all(
+    ids.map((id) =>
+      supabaseFetch(`/rest/v1/ledger_records?id=eq.${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      }),
+    ),
+  );
+  state.syncQueue.deletes = [];
+  saveSyncQueue();
+}
+
+async function pullCloudRecords() {
+  const rows = await supabaseFetch("/rest/v1/ledger_records?select=*&order=date.desc,created_at.desc", {
+    method: "GET",
+  });
+  const remoteRecords = rows.map(remoteToRecord);
+  state.records = dedupeRecords([...remoteRecords, ...state.records]);
+  saveRecords();
+  render();
+}
+
+async function supabaseFetch(path, options = {}) {
+  ensureCloudConfig();
+  const headers = {
+    apikey: state.cloud.anonKey,
+    "Content-Type": "application/json",
+  };
+
+  if (options.auth !== false) {
+    if (!state.session?.access_token) throw new Error("请先登录云同步账号。");
+    headers.Authorization = `Bearer ${state.session.access_token}`;
+  }
+
+  if (options.prefer) headers.Prefer = options.prefer;
+  if (options.method === "POST" && path.startsWith("/rest/")) {
+    headers.Prefer = [headers.Prefer, "return=minimal"].filter(Boolean).join(",");
+  }
+
+  const response = await fetch(`${state.cloud.url}${path}`, {
+    method: options.method || "GET",
+    headers,
+    body: options.body == null ? undefined : JSON.stringify(options.body),
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || `云同步请求失败：${response.status}`);
+  }
+
+  if (response.status === 204) return null;
+  const text = await response.text();
+  return text ? JSON.parse(text) : null;
+}
+
+function ensureCloudConfig() {
+  if (!state.cloud.url || !state.cloud.anonKey) throw new Error("请先填写并保存 Supabase URL 和 anon key。");
+}
+
+function isCloudReady() {
+  return Boolean(state.cloud.url && state.cloud.anonKey && state.session?.access_token);
+}
+
+function renderSyncStatus() {
+  const queued = state.syncQueue.upserts.length + state.syncQueue.deletes.length;
+  if (isCloudReady()) {
+    setSyncStatus(`已连接云同步。待同步 ${queued} 条。`, queued ? "" : "ok", false);
+  } else if (state.cloud.url && state.cloud.anonKey) {
+    setSyncStatus("云配置已保存，尚未登录。", "", false);
+  } else {
+    setSyncStatus("未连接云同步。", "", false);
+  }
+}
+
+function setSyncStatus(message, tone = "", update = true) {
+  els.syncStatus.textContent = message;
+  els.syncStatus.classList.toggle("is-ok", tone === "ok");
+  els.syncStatus.classList.toggle("is-error", tone === "error");
+  if (update) renderSyncStatus();
+}
+
+function normalizeSupabaseUrl(value) {
+  return value.trim().replace(/\/+$/, "");
+}
+
+function normalizeRecord(record) {
+  return {
+    id: record.id,
+    type: record.type,
+    amount: Number(record.amount),
+    category: record.category || "未分类",
+    date: record.date,
+    note: record.note || "",
+    source: record.source || "手动",
+    createdAt: record.createdAt || new Date().toISOString(),
+  };
+}
+
+function recordToRemote(record) {
+  const item = normalizeRecord(record);
+  return {
+    id: item.id,
+    type: item.type,
+    amount: item.amount,
+    category: item.category,
+    record_date: item.date,
+    note: item.note,
+    source: item.source,
+    created_at: item.createdAt,
+  };
+}
+
+function remoteToRecord(row) {
+  return {
+    id: row.id,
+    type: row.type,
+    amount: Number(row.amount),
+    category: row.category,
+    date: row.record_date,
+    note: row.note || "",
+    source: row.source || "云端",
+    createdAt: row.created_at || new Date().toISOString(),
+  };
 }
 
 function dedupeRecords(records) {
