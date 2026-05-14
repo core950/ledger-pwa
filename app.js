@@ -284,6 +284,9 @@ async function loadImportFile(file) {
 async function readBillFile(file) {
   const buffer = await file.arrayBuffer();
   if (isXlsxFile(file, buffer)) {
+    if (isIOSDevice()) {
+      throw new Error("iOS 版暂不建议直接导入微信 XLSX。请在电脑网页端导入这个文件并点击同步，iPhone 登录同一账号后点“从云端恢复”；或先把账单另存为 CSV/TXT 再导入。");
+    }
     return xlsxRowsToText(await readXlsxRows(buffer));
   }
 
@@ -301,6 +304,10 @@ function isXlsxFile(file, buffer) {
   const bytes = new Uint8Array(buffer, 0, Math.min(4, buffer.byteLength));
   const isZip = bytes[0] === 0x50 && bytes[1] === 0x4b;
   return isZip || /\.xlsx$/i.test(file.name);
+}
+
+function isIOSDevice() {
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 }
 
 async function readXlsxRows(buffer) {
@@ -366,7 +373,9 @@ async function readZipText(buffer, entry) {
 
   if (entry.method === 0) return new TextDecoder("utf-8").decode(data);
   if (entry.method !== 8) throw new Error("暂不支持这个 Excel 压缩格式。");
-  if (!("DecompressionStream" in window)) throw new Error("当前浏览器不支持直接读取 XLSX，请先另存为 CSV 后导入。");
+  if (!("DecompressionStream" in window)) {
+    throw new Error("当前浏览器不支持直接读取 XLSX。请在电脑网页端导入并同步到 iPhone，或先把账单另存为 CSV/TXT 后导入。");
+  }
 
   const inflated = await inflateRaw(data);
   return new TextDecoder("utf-8").decode(inflated);
