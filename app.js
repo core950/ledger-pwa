@@ -9,6 +9,7 @@ const state = {
   session: loadCloudSession(),
   syncQueue: loadSyncQueue(),
   preview: [],
+  editingId: null,
   deferredPrompt: null,
 };
 
@@ -24,11 +25,17 @@ const els = {
   categoryInput: document.querySelector("#categoryInput"),
   dateInput: document.querySelector("#dateInput"),
   noteInput: document.querySelector("#noteInput"),
+  saveRecordButton: document.querySelector("#saveRecordButton"),
+  cancelEditButton: document.querySelector("#cancelEditButton"),
   recordsList: document.querySelector("#recordsList"),
   recordsEmpty: document.querySelector("#recordsEmpty"),
   recordTemplate: document.querySelector("#recordTemplate"),
   searchInput: document.querySelector("#searchInput"),
   monthInput: document.querySelector("#monthInput"),
+  dayInput: document.querySelector("#dayInput"),
+  dayBalance: document.querySelector("#dayBalance"),
+  dayExpense: document.querySelector("#dayExpense"),
+  dayIncome: document.querySelector("#dayIncome"),
   clearFiltersButton: document.querySelector("#clearFiltersButton"),
   fileInput: document.querySelector("#fileInput"),
   dropzone: document.querySelector("#dropzone"),
@@ -96,33 +103,45 @@ function bindEvents() {
     const amount = normalizeAmount(els.amountInput.value);
     if (!amount) return;
 
-    addRecords([
-      {
-        id: crypto.randomUUID(),
-        type: els.typeInput.value,
-        amount,
-        category: els.categoryInput.value.trim() || "未分类",
-        date: els.dateInput.value,
-        note: els.noteInput.value.trim(),
-        source: "手动",
-        createdAt: new Date().toISOString(),
-      },
-    ], { sync: true });
+    const record = {
+      id: state.editingId || crypto.randomUUID(),
+      type: els.typeInput.value,
+      amount,
+      category: els.categoryInput.value.trim() || "未分类",
+      date: els.dateInput.value,
+      note: els.noteInput.value.trim(),
+      source: state.editingId ? getRecordById(state.editingId)?.source || "手动" : "手动",
+      createdAt: state.editingId ? getRecordById(state.editingId)?.createdAt || new Date().toISOString() : new Date().toISOString(),
+    };
+
+    if (state.editingId) {
+      updateRecord(record, { sync: true });
+      stopEditing();
+    } else {
+      addRecords([record], { sync: true });
+    }
 
     els.amountInput.value = "";
     els.noteInput.value = "";
     els.amountInput.focus();
   });
 
-  [els.searchInput, els.monthInput].forEach((input) => {
+  [els.searchInput, els.monthInput, els.dayInput].forEach((input) => {
     input.addEventListener("input", renderRecords);
   });
+  els.dayInput.addEventListener("input", () => {
+    if (els.dayInput.value) els.monthInput.value = els.dayInput.value.slice(0, 7);
+    renderRecords();
+  });
+  els.dateInput.addEventListener("input", renderDailySummary);
 
   els.clearFiltersButton.addEventListener("click", () => {
     els.searchInput.value = "";
     els.monthInput.value = formatMonth(new Date());
+    els.dayInput.value = "";
     renderRecords();
   });
+  els.cancelEditButton.addEventListener("click", stopEditing);
 
   els.fileInput.addEventListener("change", async () => {
     const file = els.fileInput.files[0];
@@ -187,6 +206,16 @@ function addRecords(records, options = {}) {
   render();
 }
 
+function updateRecord(record, options = {}) {
+  state.records = state.records.map((item) => (item.id === record.id ? normalizeRecord(record) : item));
+  saveRecords();
+  if (options.sync) {
+    queueUpserts([record]);
+    syncNow({ silent: true });
+  }
+  render();
+}
+
 function loadRecords() {
   try {
     return JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
@@ -220,8 +249,10 @@ function renderSummary() {
 function renderRecords() {
   const keyword = els.searchInput.value.trim().toLowerCase();
   const month = els.monthInput.value;
+  const day = els.dayInput.value;
   const records = state.records
     .filter((record) => !month || record.date.startsWith(month))
+    .filter((record) => !day || record.date === day)
     .filter((record) => {
       const text = `${record.category} ${record.note} ${record.source}`.toLowerCase();
       return !keyword || text.includes(keyword);
@@ -231,6 +262,7 @@ function renderRecords() {
   els.recordsList.replaceChildren(...records.map((record) => createRecordNode(record)));
   els.recordsEmpty.classList.toggle("is-visible", records.length === 0);
   renderSummary();
+  renderDailySummary();
 }
 
 function createRecordNode(record, options = {}) {
@@ -241,6 +273,7 @@ function createRecordNode(record, options = {}) {
   const meta = node.querySelector(".record-main span");
   const amount = node.querySelector(".record-side b");
   const date = node.querySelector(".record-side small");
+  const editButton = node.querySelector(".edit-button");
   const deleteButton = node.querySelector(".delete-button");
 
   title.textContent = record.category;
@@ -252,8 +285,10 @@ function createRecordNode(record, options = {}) {
   if (options.preview) {
     checkboxWrap.hidden = false;
     checkbox.dataset.id = record.id;
+    editButton.hidden = true;
     deleteButton.hidden = true;
   } else {
+    editButton.addEventListener("click", () => startEditing(record.id));
     deleteButton.addEventListener("click", () => {
       state.records = state.records.filter((item) => item.id !== record.id);
       saveRecords();
@@ -264,6 +299,46 @@ function createRecordNode(record, options = {}) {
   }
 
   return node;
+}
+
+function renderDailySummary() {
+  const day = els.dayInput.value || els.dateInput.value || formatDate(new Date());
+  const dayRecords = state.records.filter((record) => record.date === day);
+  const income = sum(dayRecords.filter((record) => record.type === "income"));
+  const expense = sum(dayRecords.filter((record) => record.type === "expense"));
+
+  els.dayIncome.textContent = money(income);
+  els.dayExpense.textContent = money(expense);
+  els.dayBalance.textContent = money(income - expense);
+}
+
+function startEditing(id) {
+  const record = getRecordById(id);
+  if (!record) return;
+  state.editingId = id;
+  els.typeInput.value = record.type;
+  els.amountInput.value = record.amount;
+  els.categoryInput.value = record.category;
+  els.dateInput.value = record.date;
+  els.noteInput.value = record.note || "";
+  els.saveRecordButton.textContent = "保存修改";
+  els.cancelEditButton.hidden = false;
+  els.entryForm.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function stopEditing() {
+  state.editingId = null;
+  els.saveRecordButton.textContent = "记一笔";
+  els.cancelEditButton.hidden = true;
+  els.typeInput.value = "expense";
+  els.categoryInput.value = "";
+  els.dateInput.value = formatDate(new Date());
+  els.amountInput.value = "";
+  els.noteInput.value = "";
+}
+
+function getRecordById(id) {
+  return state.records.find((record) => record.id === id);
 }
 
 function parseImportText() {

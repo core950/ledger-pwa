@@ -71,7 +71,8 @@
             <span>备注</span>
             <input id="noteInput" placeholder="商户、平台或说明" />
           </label>
-          <button class="primary wide" type="submit">记一笔</button>
+          <button class="primary wide" id="saveRecordButton" type="submit">记一笔</button>
+          <button class="secondary wide" id="cancelEditButton" type="button" hidden>取消修改</button>
         </form>
 
         <div class="section-head">
@@ -81,7 +82,22 @@
         <div class="filters">
           <input id="searchInput" placeholder="搜索备注或分类" />
           <input id="monthInput" type="month" />
+          <input id="dayInput" type="date" aria-label="按日筛选" />
         </div>
+        <section class="daily-summary" aria-label="每日汇总">
+          <div>
+            <span>当日结余</span>
+            <strong id="dayBalance">¥0.00</strong>
+          </div>
+          <div>
+            <span>支出</span>
+            <strong id="dayExpense">¥0.00</strong>
+          </div>
+          <div>
+            <span>收入</span>
+            <strong id="dayIncome">¥0.00</strong>
+          </div>
+        </section>
         <ol class="records" id="recordsList"></ol>
         <p class="empty" id="recordsEmpty">还没有记录，先手动记一笔或导入账单。</p>
       </section>
@@ -175,6 +191,7 @@
           <b></b>
           <small></small>
         </div>
+        <button class="edit-button" type="button" aria-label="编辑记录">编辑</button>
         <button class="delete-button" type="button" aria-label="删除记录">×</button>
       </li>
     </template>

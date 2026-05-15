@@ -225,9 +225,37 @@ textarea:focus {
 
 .filters {
   display: grid;
-  grid-template-columns: 1fr 150px;
+  grid-template-columns: 1fr 150px 150px;
   gap: 8px;
   margin-bottom: 10px;
+}
+
+.daily-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.daily-summary div {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.daily-summary span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.daily-summary strong {
+  display: block;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  font-size: 16px;
 }
 
 .records,
@@ -241,7 +269,7 @@ textarea:focus {
 
 .record {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
   align-items: center;
   gap: 10px;
   min-height: 66px;
@@ -293,6 +321,16 @@ textarea:focus {
   background: var(--soft);
   color: var(--muted);
   font-size: 20px;
+}
+
+.edit-button {
+  min-width: 44px;
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .check-wrap {
@@ -426,6 +464,10 @@ textarea:focus {
     grid-template-columns: 1fr;
   }
 
+  .daily-summary {
+    grid-template-columns: 1fr;
+  }
+
   .tabs {
     gap: 4px;
   }
@@ -435,7 +477,7 @@ textarea:focus {
   }
 
   .record {
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
   }
 
   .record-side {
@@ -445,7 +487,7 @@ textarea:focus {
   }
 
   .delete-button {
-    grid-column: 3;
+    grid-column: 4;
     grid-row: 1 / 3;
   }
 }
