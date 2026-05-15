@@ -932,10 +932,20 @@ function saveCloudConfig(event) {
   event.preventDefault();
   state.cloud = {
     url: normalizeSupabaseUrl(els.supabaseUrlInput.value),
-    anonKey: els.supabaseKeyInput.value.trim(),
+    anonKey: normalizeSupabaseKey(els.supabaseKeyInput.value),
   };
   localStorage.setItem(CLOUD_CONFIG_KEY, JSON.stringify(state.cloud));
-  setSyncStatus("云配置已保存。登录后即可同步。", "ok");
+  setSyncStatus("云配置已保存。点击“检查云配置”，或继续注册/登录。", "ok", false);
+}
+
+async function checkCloudConfig() {
+  try {
+    ensureCloudConfig();
+    await supabaseFetch("/auth/v1/settings", { method: "GET", auth: false });
+    setSyncStatus("云配置可访问。接下来请注册或登录账号。", "ok", false);
+  } catch (error) {
+    setSyncStatus(`云配置检查失败：${explainSupabaseError(error.message)}`, "error", false);
+  }
 }
 
 function loadCloudSession() {
@@ -967,6 +977,7 @@ async function handleSyncClick(event) {
     if (action === "signin") await signInOrUp("signin");
     if (action === "signup") await signInOrUp("signup");
     if (action === "signout") signOut();
+    if (action === "check") await checkCloudConfig();
     if (action === "sync") await syncNow({ pullFirst: false });
     if (action === "pull") await syncNow({ pullFirst: true });
   } finally {
@@ -1015,27 +1026,26 @@ async function signInOrUp(mode) {
     });
 
     if (!session.access_token && mode === "signup") {
-      setSyncStatus("注册成功。若 Supabase 开启了邮箱验证，请先去邮箱确认，再回来登录。", "ok");
+      setSyncStatus("注册成功。若 Supabase 开启了邮箱验证，请先去邮箱确认，再回来登录。", "ok", false);
       return;
     }
 
     saveCloudSession(session);
-    setSyncStatus("已登录，正在同步。", "ok");
+    setSyncStatus("已登录，正在同步。", "ok", false);
     await syncNow({ pullFirst: true });
   } catch (error) {
-    setSyncStatus(error.message, "error");
+    setSyncStatus(explainSupabaseError(error.message), "error", false);
   }
 }
 
 function signOut() {
   saveCloudSession(null);
-  setSyncStatus("已退出登录。本地数据仍保留。", "");
-  renderSyncStatus();
+  setSyncStatus("已退出登录。本地数据仍保留。", "", false);
 }
 
 async function syncNow(options = {}) {
   if (!isCloudReady()) {
-    if (!options.silent) setSyncStatus("请先保存 Supabase 配置并登录。", "error");
+    if (!options.silent) setSyncStatus("请先保存 Supabase 配置并登录。", "error", false);
     return;
   }
 
@@ -1046,7 +1056,7 @@ async function syncNow(options = {}) {
     await pullCloudRecords();
     setSyncStatus(`同步完成：${new Date().toLocaleString("zh-CN")}`, "ok", false);
   } catch (error) {
-    if (!options.silent) setSyncStatus(error.message, "error", false);
+    if (!options.silent) setSyncStatus(explainSupabaseError(error.message), "error", false);
   }
 }
 
@@ -1110,8 +1120,7 @@ async function supabaseFetch(path, options = {}) {
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || `云同步请求失败：${response.status}`);
+    throw new Error(await readSupabaseError(response));
   }
 
   if (response.status === 204) return null;
@@ -1128,6 +1137,7 @@ function isCloudReady() {
 }
 
 function renderSyncStatus() {
+  if (els.syncStatus.dataset.pinned === "true") return;
   const queued = state.syncQueue.upserts.length + state.syncQueue.deletes.length;
   if (isCloudReady()) {
     setSyncStatus(`已连接云同步。待同步 ${queued} 条。`, queued ? "" : "ok", false);
@@ -1142,11 +1152,40 @@ function setSyncStatus(message, tone = "", update = true) {
   els.syncStatus.textContent = message;
   els.syncStatus.classList.toggle("is-ok", tone === "ok");
   els.syncStatus.classList.toggle("is-error", tone === "error");
+  els.syncStatus.dataset.pinned = update ? "false" : "true";
   if (update) renderSyncStatus();
+}
+
+async function readSupabaseError(response) {
+  const text = await response.text();
+  if (!text) return `云同步请求失败：${response.status}`;
+
+  try {
+    const data = JSON.parse(text);
+    return data.msg || data.message || data.error_description || data.error || text;
+  } catch {
+    return text;
+  }
+}
+
+function explainSupabaseError(message = "") {
+  const text = String(message);
+  if (/Invalid login credentials/i.test(text)) return "邮箱或密码不正确，或者这个邮箱还没有注册。第一次使用请先点“注册”。";
+  if (/Email not confirmed/i.test(text)) return "邮箱还没有验证。请去邮箱里点击 Supabase 的确认邮件，然后再登录。";
+  if (/User already registered/i.test(text)) return "这个邮箱已经注册过了，请直接点“登录”。";
+  if (/Invalid API key|No API key|apikey/i.test(text)) return "Publishable key 不正确或没有复制完整。请重新复制 sb_publishable_ 开头的完整 key。";
+  if (/Failed to fetch|NetworkError|Load failed/i.test(text)) return "网络连接失败，或 Project URL 不正确。请检查 URL 是否类似 https://xxxx.supabase.co。";
+  if (/relation .*ledger_records.* does not exist|Could not find the table/i.test(text)) return "云端数据表还没建好。请在 Supabase SQL Editor 运行 README 里的建表 SQL。";
+  if (/row-level security|permission denied|violates row-level security/i.test(text)) return "数据表权限策略没有建好。请确认 README 里的 RLS policy SQL 已运行。";
+  return text;
 }
 
 function normalizeSupabaseUrl(value) {
   return value.trim().replace(/\/+$/, "");
+}
+
+function normalizeSupabaseKey(value) {
+  return value.replace(/\s/g, "");
 }
 
 function normalizeRecord(record) {
