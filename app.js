@@ -52,6 +52,7 @@ const els = {
   wipeButton: document.querySelector("#wipeButton"),
   installButton: document.querySelector("#installButton"),
   syncStatus: document.querySelector("#syncStatus"),
+  syncView: document.querySelector("#syncView"),
   cloudConfigForm: document.querySelector("#cloudConfigForm"),
   supabaseUrlInput: document.querySelector("#supabaseUrlInput"),
   supabaseKeyInput: document.querySelector("#supabaseKeyInput"),
@@ -169,11 +170,8 @@ function bindEvents() {
   els.backupInput.addEventListener("change", importBackup);
   els.wipeButton.addEventListener("click", wipeData);
   els.cloudConfigForm.addEventListener("submit", saveCloudConfig);
-  els.signInButton.addEventListener("click", () => signInOrUp("signin"));
-  els.signUpButton.addEventListener("click", () => signInOrUp("signup"));
-  els.signOutButton.addEventListener("click", signOut);
-  els.syncNowButton.addEventListener("click", () => syncNow({ pullFirst: false }));
-  els.pullCloudButton.addEventListener("click", () => syncNow({ pullFirst: true }));
+  els.authForm.addEventListener("submit", (event) => event.preventDefault());
+  els.syncView.addEventListener("click", handleSyncClick);
   window.addEventListener("online", () => syncNow({ silent: true }));
 
   window.addEventListener("beforeinstallprompt", (event) => {
@@ -351,6 +349,9 @@ async function loadImportFile(file) {
   try {
     els.pasteInput.value = await readBillFile(file);
     parseImportText();
+    if (!state.preview.length) {
+      alert("没有识别到账单记录。请确认文件是微信支付导出的账单明细，或把文件另存为 CSV/TXT 后再试。");
+    }
   } catch (error) {
     alert(error.message || "账单文件读取失败。");
   }
@@ -359,9 +360,6 @@ async function loadImportFile(file) {
 async function readBillFile(file) {
   const buffer = await file.arrayBuffer();
   if (isXlsxFile(file, buffer)) {
-    if (isIOSDevice()) {
-      throw new Error("iOS 版暂不建议直接导入微信 XLSX。请在电脑网页端导入这个文件并点击同步，iPhone 登录同一账号后点“从云端恢复”；或先把账单另存为 CSV/TXT 再导入。");
-    }
     return xlsxRowsToText(await readXlsxRows(buffer));
   }
 
@@ -379,10 +377,6 @@ function isXlsxFile(file, buffer) {
   const bytes = new Uint8Array(buffer, 0, Math.min(4, buffer.byteLength));
   const isZip = bytes[0] === 0x50 && bytes[1] === 0x4b;
   return isZip || /\.xlsx$/i.test(file.name);
-}
-
-function isIOSDevice() {
-  return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 }
 
 async function readXlsxRows(buffer) {
@@ -449,7 +443,7 @@ async function readZipText(buffer, entry) {
   if (entry.method === 0) return new TextDecoder("utf-8").decode(data);
   if (entry.method !== 8) throw new Error("暂不支持这个 Excel 压缩格式。");
   if (!("DecompressionStream" in window)) {
-    throw new Error("当前浏览器不支持直接读取 XLSX。请在电脑网页端导入并同步到 iPhone，或先把账单另存为 CSV/TXT 后导入。");
+    throw new Error("当前浏览器不支持直接读取 XLSX。请把微信账单另存为 CSV/TXT 后导入，或在电脑网页端导入并同步到手机。");
   }
 
   const inflated = await inflateRaw(data);
@@ -893,6 +887,25 @@ function saveCloudSession(session) {
     localStorage.setItem(CLOUD_SESSION_KEY, JSON.stringify(session));
   } else {
     localStorage.removeItem(CLOUD_SESSION_KEY);
+  }
+}
+
+async function handleSyncClick(event) {
+  const button = event.target.closest("[data-sync-action]");
+  if (!button) return;
+
+  event.preventDefault();
+  const action = button.dataset.syncAction;
+  button.disabled = true;
+
+  try {
+    if (action === "signin") await signInOrUp("signin");
+    if (action === "signup") await signInOrUp("signup");
+    if (action === "signout") signOut();
+    if (action === "sync") await syncNow({ pullFirst: false });
+    if (action === "pull") await syncNow({ pullFirst: true });
+  } finally {
+    button.disabled = false;
   }
 }
 

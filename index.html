@@ -153,14 +153,14 @@
             <span>密码</span>
             <input id="passwordInput" type="password" placeholder="至少 6 位" autocomplete="current-password" />
           </label>
-          <button class="primary" id="signInButton" type="button">登录</button>
-          <button class="secondary" id="signUpButton" type="button">注册</button>
-          <button class="secondary wide" id="signOutButton" type="button">退出登录</button>
+          <button class="primary" id="signInButton" data-sync-action="signin" type="button">登录</button>
+          <button class="secondary" id="signUpButton" data-sync-action="signup" type="button">注册</button>
+          <button class="secondary wide" id="signOutButton" data-sync-action="signout" type="button">退出登录</button>
         </form>
 
         <div class="backup-grid">
-          <button class="primary" id="syncNowButton" type="button">立即同步</button>
-          <button class="secondary" id="pullCloudButton" type="button">从云端恢复</button>
+          <button class="primary" id="syncNowButton" data-sync-action="sync" type="button">立即同步</button>
+          <button class="secondary" id="pullCloudButton" data-sync-action="pull" type="button">从云端恢复</button>
         </div>
         <p class="hint">长期使用建议开启云同步。数据会先保存在本机，再上传到你的 Supabase 数据库；离线记录会在下次联网后同步。</p>
       </section>
