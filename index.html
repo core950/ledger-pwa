@@ -47,6 +47,21 @@
       </nav>
 
       <section class="view is-active" id="recordsView">
+        <section class="daily-summary home-daily" aria-label="今日汇总">
+          <div>
+            <span>今日结余</span>
+            <strong id="dayBalance">¥0.00</strong>
+          </div>
+          <div>
+            <span>支出</span>
+            <strong id="dayExpense">¥0.00</strong>
+          </div>
+          <div>
+            <span>收入</span>
+            <strong id="dayIncome">¥0.00</strong>
+          </div>
+        </section>
+
         <form class="entry-form" id="entryForm">
           <label>
             <span>类型</span>
@@ -76,7 +91,7 @@
         </form>
 
         <div class="section-head">
-          <h2>最近记录</h2>
+          <h2>流水</h2>
           <button class="text-button" id="clearFiltersButton" type="button">清除筛选</button>
         </div>
         <div class="filters">
@@ -84,20 +99,6 @@
           <input id="monthInput" type="month" />
           <input id="dayInput" type="date" aria-label="按日筛选" />
         </div>
-        <section class="daily-summary" aria-label="每日汇总">
-          <div>
-            <span>当日结余</span>
-            <strong id="dayBalance">¥0.00</strong>
-          </div>
-          <div>
-            <span>支出</span>
-            <strong id="dayExpense">¥0.00</strong>
-          </div>
-          <div>
-            <span>收入</span>
-            <strong id="dayIncome">¥0.00</strong>
-          </div>
-        </section>
         <ol class="records" id="recordsList"></ol>
         <p class="empty" id="recordsEmpty">还没有记录，先手动记一笔或导入账单。</p>
       </section>

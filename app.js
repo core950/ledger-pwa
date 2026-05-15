@@ -87,6 +87,7 @@ function initialize() {
   els.supabaseUrlInput.value = state.cloud.url || "";
   els.supabaseKeyInput.value = state.cloud.anonKey || "";
   bindEvents();
+  handleQuickLink();
   render();
 
   if ("serviceWorker" in navigator) {
@@ -257,10 +258,42 @@ function renderRecords() {
     })
     .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
 
-  els.recordsList.replaceChildren(...records.map((record) => createRecordNode(record)));
+  els.recordsList.replaceChildren(...createGroupedRecordNodes(records));
   els.recordsEmpty.classList.toggle("is-visible", records.length === 0);
   renderSummary();
   renderDailySummary();
+}
+
+function createGroupedRecordNodes(records) {
+  const groups = new Map();
+  records.forEach((record) => {
+    if (!groups.has(record.date)) groups.set(record.date, []);
+    groups.get(record.date).push(record);
+  });
+
+  return [...groups.entries()].map(([date, items]) => {
+    const group = document.createElement("li");
+    group.className = "day-group";
+
+    const income = sum(items.filter((record) => record.type === "income"));
+    const expense = sum(items.filter((record) => record.type === "expense"));
+    const heading = document.createElement("div");
+    heading.className = "day-heading";
+
+    const title = document.createElement("strong");
+    title.textContent = formatDayLabel(date);
+
+    const total = document.createElement("span");
+    total.textContent = `支 ${money(expense)} · 收 ${money(income)}`;
+
+    const list = document.createElement("ol");
+    list.className = "day-records";
+    list.replaceChildren(...items.map((record) => createRecordNode(record)));
+
+    heading.replaceChildren(title, total);
+    group.replaceChildren(heading, list);
+    return group;
+  });
 }
 
 function createRecordNode(record, options = {}) {
@@ -337,6 +370,38 @@ function stopEditing() {
 
 function getRecordById(id) {
   return state.records.find((record) => record.id === id);
+}
+
+function handleQuickLink() {
+  const params = new URLSearchParams(window.location.search);
+  if (!params.has("quick")) return;
+
+  const amount = normalizeAmount(params.get("amount") || "");
+  const record = {
+    id: crypto.randomUUID(),
+    type: params.get("type") === "income" ? "income" : "expense",
+    amount,
+    category: params.get("category") || "快捷记账",
+    date: params.get("date") || formatDate(new Date()),
+    note: params.get("note") || "背面轻点",
+    source: "快捷指令",
+    createdAt: new Date().toISOString(),
+  };
+
+  switchView("records");
+
+  if (params.get("auto") === "1" && amount) {
+    addRecords([record], { sync: true });
+    history.replaceState(null, "", window.location.pathname);
+    return;
+  }
+
+  els.typeInput.value = record.type;
+  els.amountInput.value = amount || "";
+  els.categoryInput.value = record.category;
+  els.dateInput.value = record.date;
+  els.noteInput.value = record.note;
+  history.replaceState(null, "", window.location.pathname);
 }
 
 function parseImportText() {
@@ -1155,4 +1220,20 @@ function formatDate(date) {
 
 function formatMonth(date) {
   return formatDate(date).slice(0, 7);
+}
+
+function formatDayLabel(value) {
+  const date = new Date(`${value}T00:00:00`);
+  const today = formatDate(new Date());
+  if (value === today) return "今天";
+
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (value === formatDate(yesterday)) return "昨天";
+
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "long",
+    day: "numeric",
+    weekday: "short",
+  }).format(date);
 }
