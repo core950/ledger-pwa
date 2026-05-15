@@ -1087,7 +1087,7 @@ async function flushDeletes() {
 }
 
 async function pullCloudRecords() {
-  const rows = await supabaseFetch("/rest/v1/ledger_records?select=*&order=date.desc,created_at.desc", {
+  const rows = await supabaseFetch("/rest/v1/ledger_records?select=*&order=record_date.desc,created_at.desc", {
     method: "GET",
   });
   const remoteRecords = rows.map(remoteToRecord);
