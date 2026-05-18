@@ -871,11 +871,26 @@ function normalizeExcelDate(value) {
 
   const serial = Number(text);
   if (!Number.isFinite(serial) || serial < 20000 || serial > 80000) return text;
-  const totalSeconds = Math.round((serial - Math.floor(serial)) * 24 * 60 * 60);
-  const utcDays = Math.floor(serial - 25569);
-  const utcValue = utcDays * 86400 + totalSeconds;
-  const date = new Date(utcValue * 1000);
-  return `${formatDate(date)} ${formatTime(date)}`;
+  return excelSerialToLocalDateTime(serial);
+}
+
+function excelSerialToLocalDateTime(serial) {
+  let day = Math.floor(serial);
+  let seconds = Math.round((serial - day) * 24 * 60 * 60);
+  if (seconds >= 24 * 60 * 60) {
+    day += 1;
+    seconds -= 24 * 60 * 60;
+  }
+
+  const date = new Date(Date.UTC(1970, 0, 1) + (day - 25569) * 24 * 60 * 60 * 1000);
+  const yyyy = date.getUTCFullYear();
+  const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(date.getUTCDate()).padStart(2, "0");
+  const hh = String(Math.floor(seconds / 3600)).padStart(2, "0");
+  const mi = String(Math.floor((seconds % 3600) / 60)).padStart(2, "0");
+  const ss = String(seconds % 60).padStart(2, "0");
+
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
 }
 
 function decodeBuffer(buffer, encoding) {
