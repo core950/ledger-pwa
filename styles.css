@@ -312,6 +312,58 @@ textarea:focus {
   white-space: nowrap;
 }
 
+.day-toolbar {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 0 4px;
+}
+
+.day-toolbar .text-button {
+  flex: 0 0 auto;
+}
+
+.day-sections {
+  display: grid;
+  gap: 10px;
+}
+
+.record-section {
+  display: grid;
+  gap: 6px;
+}
+
+.record-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 4px;
+}
+
+.record-section-head strong {
+  font-size: 14px;
+}
+
+.record-section-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.record-section-tools .text-button {
+  min-height: 30px;
+  padding: 0 10px;
+}
+
+.record-section.is-grouped .day-records {
+  border-style: dashed;
+  background: #d8d8d2;
+}
+
 .day-records {
   display: grid;
   gap: 1px;
@@ -322,6 +374,13 @@ textarea:focus {
   border-radius: 8px;
   background: var(--line);
   list-style: none;
+}
+
+.section-empty {
+  padding: 12px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .record {
@@ -535,7 +594,7 @@ textarea:focus {
   }
 
   .record {
-    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    grid-template-columns: auto minmax(0, 1fr) auto auto auto;
   }
 
   .record-side {
@@ -545,7 +604,7 @@ textarea:focus {
   }
 
   .delete-button {
-    grid-column: 4;
+    grid-column: 5;
     grid-row: 1 / 3;
   }
 }

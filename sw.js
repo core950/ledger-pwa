@@ -1,4 +1,4 @@
-const CACHE_NAME = "ink-ledger-v9";
+const CACHE_NAME = "ink-ledger-v10";
 const ASSETS = ["./", "index.html", "styles.css", "app.js", "manifest.webmanifest", "icon.svg"];
 
 self.addEventListener("install", (event) => {

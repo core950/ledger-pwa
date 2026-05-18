@@ -1,10 +1,12 @@
 const STORAGE_KEY = "ink-ledger-records-v1";
+const DAY_GROUPS_KEY = "ink-ledger-day-groups-v1";
 const CLOUD_CONFIG_KEY = "ink-ledger-cloud-config-v1";
 const CLOUD_SESSION_KEY = "ink-ledger-cloud-session-v1";
 const SYNC_QUEUE_KEY = "ink-ledger-sync-queue-v1";
 
 const state = {
   records: loadRecords(),
+  dayGroups: loadDayGroups(),
   cloud: loadCloudConfig(),
   session: loadCloudSession(),
   syncQueue: loadSyncQueue(),
@@ -105,6 +107,7 @@ function bindEvents() {
     const amount = normalizeAmount(els.amountInput.value);
     if (!amount) return;
 
+    const existingRecord = state.editingId ? getRecordById(state.editingId) : null;
     const record = {
       id: state.editingId || crypto.randomUUID(),
       type: els.typeInput.value,
@@ -112,8 +115,10 @@ function bindEvents() {
       category: els.categoryInput.value.trim() || "未分类",
       date: els.dateInput.value,
       note: els.noteInput.value.trim(),
-      source: state.editingId ? getRecordById(state.editingId)?.source || "手动" : "手动",
-      createdAt: state.editingId ? getRecordById(state.editingId)?.createdAt || new Date().toISOString() : new Date().toISOString(),
+      source: existingRecord?.source || "手动",
+      groupName: existingRecord?.groupName || "",
+      isGroupItem: Boolean(existingRecord?.isGroupItem),
+      createdAt: existingRecord?.createdAt || new Date().toISOString(),
     };
 
     if (state.editingId) {
@@ -227,6 +232,18 @@ function saveRecords() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state.records));
 }
 
+function loadDayGroups() {
+  try {
+    return JSON.parse(localStorage.getItem(DAY_GROUPS_KEY)) || {};
+  } catch {
+    return {};
+  }
+}
+
+function saveDayGroups() {
+  localStorage.setItem(DAY_GROUPS_KEY, JSON.stringify(state.dayGroups));
+}
+
 function render() {
   renderSummary();
   renderRecords();
@@ -236,7 +253,7 @@ function render() {
 
 function renderSummary() {
   const month = els.monthInput.value || formatMonth(new Date());
-  const monthRecords = state.records.filter((record) => record.date.startsWith(month));
+  const monthRecords = state.records.filter((record) => record.date.startsWith(month) && !record.isGroupItem);
   const income = sum(monthRecords.filter((record) => record.type === "income"));
   const expense = sum(monthRecords.filter((record) => record.type === "expense"));
 
@@ -271,12 +288,26 @@ function createGroupedRecordNodes(records) {
     groups.get(record.date).push(record);
   });
 
-  return [...groups.entries()].map(([date, items]) => {
+  const keyword = els.searchInput.value.trim();
+  const month = els.monthInput.value;
+  const day = els.dayInput.value;
+  if (!keyword) {
+    Object.keys(state.dayGroups).forEach((date) => {
+      if (day && date !== day) return;
+      if (month && !date.startsWith(month)) return;
+      if (!groups.has(date)) groups.set(date, []);
+    });
+    const activeDay = day || els.dateInput.value || formatDate(new Date());
+    if ((!month || activeDay.startsWith(month)) && !groups.has(activeDay)) groups.set(activeDay, []);
+  }
+
+  return [...groups.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([date, items]) => {
     const group = document.createElement("li");
     group.className = "day-group";
 
-    const income = sum(items.filter((record) => record.type === "income"));
-    const expense = sum(items.filter((record) => record.type === "expense"));
+    const billableItems = items.filter((record) => !record.isGroupItem);
+    const income = sum(billableItems.filter((record) => record.type === "income"));
+    const expense = sum(billableItems.filter((record) => record.type === "expense"));
     const heading = document.createElement("div");
     heading.className = "day-heading";
 
@@ -286,14 +317,101 @@ function createGroupedRecordNodes(records) {
     const total = document.createElement("span");
     total.textContent = `支 ${money(expense)} · 收 ${money(income)}`;
 
-    const list = document.createElement("ol");
-    list.className = "day-records";
-    list.replaceChildren(...items.map((record) => createRecordNode(record)));
+    const toolbar = createDayGroupToolbar(date);
+    const list = document.createElement("div");
+    list.className = "day-sections";
+    list.replaceChildren(...createDaySections(date, items));
 
     heading.replaceChildren(title, total);
-    group.replaceChildren(heading, list);
+    group.replaceChildren(heading, toolbar, list);
     return group;
   });
+}
+
+function createDayGroupToolbar(date) {
+  const toolbar = document.createElement("div");
+  toolbar.className = "day-toolbar";
+
+  const createButton = document.createElement("button");
+  createButton.type = "button";
+  createButton.className = "text-button";
+  createButton.textContent = "新建分组";
+  createButton.addEventListener("click", () => createDayGroup(date));
+
+  const moveButton = document.createElement("button");
+  moveButton.type = "button";
+  moveButton.className = "text-button";
+  moveButton.textContent = "选中归组";
+  moveButton.addEventListener("click", () => moveSelectedToGroup(date));
+
+  const ungroupButton = document.createElement("button");
+  ungroupButton.type = "button";
+  ungroupButton.className = "text-button";
+  ungroupButton.textContent = "取消分组";
+  ungroupButton.addEventListener("click", () => moveSelectedToUngrouped(date));
+
+  toolbar.replaceChildren(createButton, moveButton, ungroupButton);
+  return toolbar;
+}
+
+function createDaySections(date, records) {
+  const groups = getDayGroups(date);
+  const groupedNames = new Set(groups);
+  records.forEach((record) => {
+    if (record.groupName) groupedNames.add(record.groupName);
+  });
+
+  const nodes = [...groupedNames].map((groupName) => {
+    const items = records.filter((record) => record.groupName === groupName);
+    return createRecordSection(date, groupName, items, true);
+  });
+
+  const ungrouped = records.filter((record) => !record.groupName);
+  nodes.push(createRecordSection(date, "未分组", ungrouped, false));
+  return nodes;
+}
+
+function createRecordSection(date, title, records, isGroup) {
+  const section = document.createElement("section");
+  section.className = isGroup ? "record-section is-grouped" : "record-section";
+
+  const income = sum(records.filter((record) => record.type === "income"));
+  const expense = sum(records.filter((record) => record.type === "expense"));
+  const head = document.createElement("div");
+  head.className = "record-section-head";
+
+  const name = document.createElement("strong");
+  name.textContent = title;
+
+  const tools = document.createElement("div");
+  tools.className = "record-section-tools";
+  const total = document.createElement("span");
+  total.textContent = `支 ${money(expense)} · 收 ${money(income)}`;
+  tools.append(total);
+
+  if (isGroup) {
+    const addButton = document.createElement("button");
+    addButton.type = "button";
+    addButton.className = "text-button";
+    addButton.textContent = "组内新增";
+    addButton.addEventListener("click", () => addRecordInsideGroup(date, title));
+    tools.append(addButton);
+  }
+
+  const list = document.createElement("ol");
+  list.className = "day-records";
+  if (records.length) {
+    list.replaceChildren(...records.map((record) => createRecordNode(record)));
+  } else {
+    const empty = document.createElement("li");
+    empty.className = "section-empty";
+    empty.textContent = isGroup ? "这个分组还没有明细。" : "没有未分组明细。";
+    list.replaceChildren(empty);
+  }
+
+  head.replaceChildren(name, tools);
+  section.replaceChildren(head, list);
+  return section;
 }
 
 function createRecordNode(record, options = {}) {
@@ -308,7 +426,7 @@ function createRecordNode(record, options = {}) {
   const deleteButton = node.querySelector(".delete-button");
 
   title.textContent = record.category;
-  meta.textContent = [record.note || "无备注", record.source].filter(Boolean).join(" · ");
+  meta.textContent = [record.note || "无备注", getDisplaySource(record)].filter(Boolean).join(" · ");
   amount.textContent = `${record.type === "income" ? "+" : "-"}${money(record.amount)}`;
   amount.className = record.type;
   date.textContent = record.date;
@@ -319,6 +437,10 @@ function createRecordNode(record, options = {}) {
     editButton.hidden = true;
     deleteButton.hidden = true;
   } else {
+    checkboxWrap.hidden = false;
+    checkbox.checked = false;
+    checkbox.dataset.id = record.id;
+    checkbox.dataset.date = record.date;
     editButton.addEventListener("click", () => startEditing(record.id));
     deleteButton.addEventListener("click", () => {
       state.records = state.records.filter((item) => item.id !== record.id);
@@ -334,7 +456,7 @@ function createRecordNode(record, options = {}) {
 
 function renderDailySummary() {
   const day = els.dayInput.value || els.dateInput.value || formatDate(new Date());
-  const dayRecords = state.records.filter((record) => record.date === day);
+  const dayRecords = state.records.filter((record) => record.date === day && !record.isGroupItem);
   const income = sum(dayRecords.filter((record) => record.type === "income"));
   const expense = sum(dayRecords.filter((record) => record.type === "expense"));
 
@@ -370,6 +492,116 @@ function stopEditing() {
 
 function getRecordById(id) {
   return state.records.find((record) => record.id === id);
+}
+
+function createDayGroup(date) {
+  const name = prompt("分组名称");
+  if (!name?.trim()) return;
+  addDayGroup(date, name.trim());
+  renderRecords();
+}
+
+function addDayGroup(date, name) {
+  const groups = getDayGroups(date);
+  if (!groups.includes(name)) {
+    state.dayGroups[date] = [...groups, name];
+    saveDayGroups();
+  }
+}
+
+function getDayGroups(date) {
+  return state.dayGroups[date] || [];
+}
+
+function getSelectedRecordIds(date) {
+  return [...els.recordsList.querySelectorAll(`input[type='checkbox'][data-date='${date}']:checked`)].map(
+    (input) => input.dataset.id,
+  );
+}
+
+function moveSelectedToGroup(date) {
+  const ids = getSelectedRecordIds(date);
+  if (!ids.length) {
+    alert("请先勾选要归组的明细。");
+    return;
+  }
+
+  const existing = getDayGroups(date);
+  const name = prompt(`分组名称${existing.length ? `（已有：${existing.join("、")}）` : ""}`);
+  if (!name?.trim()) return;
+  const groupName = name.trim();
+  addDayGroup(date, groupName);
+  updateRecordsGroup(ids, groupName);
+}
+
+function moveSelectedToUngrouped(date) {
+  const ids = getSelectedRecordIds(date);
+  if (!ids.length) {
+    alert("请先勾选要取消分组的明细。");
+    return;
+  }
+  updateRecordsGroup(ids, "");
+}
+
+function updateRecordsGroup(ids, groupName) {
+  const idSet = new Set(ids);
+  const updated = [];
+  state.records = state.records.map((record) => {
+    if (!idSet.has(record.id)) return record;
+    const next = normalizeRecord({
+      ...record,
+      groupName,
+      isGroupItem: Boolean(groupName),
+      source: groupName ? record.source || "手动" : stripGroupSource(record.source),
+    });
+    updated.push(next);
+    return next;
+  });
+  saveRecords();
+  queueUpserts(updated);
+  syncNow({ silent: true });
+  render();
+}
+
+function addRecordInsideGroup(date, groupName) {
+  const amount = normalizeAmount(prompt(`添加到「${groupName}」的金额`) || "");
+  if (!amount) return;
+  const category = prompt("分类", groupName) || groupName;
+  const note = prompt("备注", "") || "";
+  const record = normalizeRecord({
+    id: crypto.randomUUID(),
+    type: "expense",
+    amount,
+    category,
+    date,
+    note,
+    source: "组内新增",
+    groupName,
+    isGroupItem: true,
+    createdAt: new Date().toISOString(),
+  });
+  addDayGroup(date, groupName);
+  addRecords([record], { sync: true });
+}
+
+function getDisplaySource(record) {
+  if (record.groupName) return `分组：${record.groupName}`;
+  return record.source;
+}
+
+function encodeGroupSource(record) {
+  const source = stripGroupSource(record.source || "手动");
+  return record.groupName ? `分组:${record.groupName}|${source}` : source;
+}
+
+function parseRemoteSource(source = "") {
+  const match = String(source).match(/^分组:([^|]+)\|(.*)$/);
+  if (!match) return { source, groupName: "", isGroupItem: false };
+  return { source: match[2] || "云端", groupName: match[1], isGroupItem: true };
+}
+
+function stripGroupSource(source = "") {
+  return parseRemoteSource(source).source || "";
 }
 
 function handleQuickLink() {
@@ -859,7 +1091,9 @@ function normalizeHeader(value = "") {
 
 function renderStats() {
   const month = els.monthInput.value || formatMonth(new Date());
-  const expenses = state.records.filter((record) => record.type === "expense" && record.date.startsWith(month));
+  const expenses = state.records.filter(
+    (record) => record.type === "expense" && record.date.startsWith(month) && !record.isGroupItem,
+  );
   const groups = expenses.reduce((result, record) => {
     result[record.category] = (result[record.category] || 0) + record.amount;
     return result;
@@ -893,7 +1127,9 @@ function renderStats() {
 }
 
 function exportBackup() {
-  const blob = new Blob([JSON.stringify({ records: state.records }, null, 2)], { type: "application/json" });
+  const blob = new Blob([JSON.stringify({ records: state.records, dayGroups: state.dayGroups }, null, 2)], {
+    type: "application/json",
+  });
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);
   link.download = `ink-ledger-${formatDate(new Date())}.json`;
@@ -907,6 +1143,8 @@ async function importBackup() {
   const data = JSON.parse(await file.text());
   if (!Array.isArray(data.records)) return;
   state.records = dedupeRecords([...data.records, ...state.records]);
+  state.dayGroups = { ...state.dayGroups, ...(data.dayGroups || {}) };
+  saveDayGroups();
   saveRecords();
   queueUpserts(state.records);
   syncNow({ silent: true });
@@ -916,7 +1154,9 @@ async function importBackup() {
 function wipeData() {
   if (!confirm("确定清空本地所有记账数据？云端数据不会自动清空。")) return;
   state.records = [];
+  state.dayGroups = {};
   saveRecords();
+  saveDayGroups();
   render();
 }
 
@@ -1189,6 +1429,8 @@ function normalizeSupabaseKey(value) {
 }
 
 function normalizeRecord(record) {
+  const parsed = parseRemoteSource(record.source || "");
+  const groupName = record.groupName || parsed.groupName || "";
   return {
     id: record.id,
     type: record.type,
@@ -1196,7 +1438,9 @@ function normalizeRecord(record) {
     category: record.category || "未分类",
     date: record.date,
     note: record.note || "",
-    source: record.source || "手动",
+    source: parsed.source || record.source || "手动",
+    groupName,
+    isGroupItem: Boolean(record.isGroupItem || groupName),
     createdAt: record.createdAt || new Date().toISOString(),
   };
 }
@@ -1210,12 +1454,13 @@ function recordToRemote(record) {
     category: item.category,
     record_date: item.date,
     note: item.note,
-    source: item.source,
+    source: encodeGroupSource(item),
     created_at: item.createdAt,
   };
 }
 
 function remoteToRecord(row) {
+  const parsed = parseRemoteSource(row.source || "云端");
   return {
     id: row.id,
     type: row.type,
@@ -1223,7 +1468,9 @@ function remoteToRecord(row) {
     category: row.category,
     date: row.record_date,
     note: row.note || "",
-    source: row.source || "云端",
+    source: parsed.source || "云端",
+    groupName: parsed.groupName,
+    isGroupItem: parsed.isGroupItem,
     createdAt: row.created_at || new Date().toISOString(),
   };
 }
@@ -1231,7 +1478,7 @@ function remoteToRecord(row) {
 function dedupeRecords(records) {
   const seen = new Set();
   return records.filter((record) => {
-    const key = [record.date, record.type, record.amount, record.category, record.note].join("|");
+    const key = record.id || [record.date, record.type, record.amount, record.category, record.note, record.groupName].join("|");
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
