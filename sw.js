@@ -1,5 +1,5 @@
-const CACHE_NAME = "ink-ledger-v12";
-const ASSETS = ["./", "index.html", "styles.css?v=12", "app.js?v=12", "manifest.webmanifest", "icon.svg", "reset.html"];
+const CACHE_NAME = "ink-ledger-v13";
+const ASSETS = ["./", "index.html", "styles.css?v=13", "app.js?v=13", "manifest.webmanifest", "icon.svg", "reset.html"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -31,10 +31,20 @@ self.addEventListener("fetch", (event) => {
   event.respondWith(
     fetch(event.request)
       .then((response) => {
+        if (!response || !response.ok) return response;
         const copy = response.clone();
         caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
         return response;
       })
-      .catch(() => caches.match(event.request)),
+      .catch(async () => {
+        const cached = await caches.match(event.request);
+        if (cached) return cached;
+
+        if (event.request.mode === "navigate") {
+          return (await caches.match("./")) || (await caches.match("index.html")) || Response.redirect("./", 302);
+        }
+
+        return new Response("", { status: 503, statusText: "Offline" });
+      }),
   );
 });
