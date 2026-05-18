@@ -1,8 +1,19 @@
-const CACHE_NAME = "ink-ledger-v10";
-const ASSETS = ["./", "index.html", "styles.css", "app.js", "manifest.webmanifest", "icon.svg"];
+const CACHE_NAME = "ink-ledger-v11";
+const ASSETS = ["./", "index.html", "styles.css?v=11", "app.js?v=11", "manifest.webmanifest", "icon.svg"];
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS)));
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) =>
+      Promise.all(
+        ASSETS.map((asset) =>
+          fetch(new Request(asset, { cache: "reload" })).then((response) => {
+            if (!response.ok) throw new Error(`Failed to cache ${asset}`);
+            return cache.put(asset, response);
+          }),
+        ),
+      ),
+    ),
+  );
   self.skipWaiting();
 });
 
@@ -17,5 +28,13 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
-  event.respondWith(caches.match(event.request).then((cached) => cached || fetch(event.request)));
+  event.respondWith(
+    fetch(event.request)
+      .then((response) => {
+        const copy = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+        return response;
+      })
+      .catch(() => caches.match(event.request)),
+  );
 });
