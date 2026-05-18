@@ -273,7 +273,7 @@ function renderRecords() {
       const text = `${record.category} ${record.note} ${record.source}`.toLowerCase();
       return !keyword || text.includes(keyword);
     })
-    .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
+    .sort((a, b) => compareRecordTimeDesc(a, b));
 
   els.recordsList.replaceChildren(...createGroupedRecordNodes(records));
   els.recordsEmpty.classList.toggle("is-visible", records.length === 0);
@@ -426,10 +426,10 @@ function createRecordNode(record, options = {}) {
   const deleteButton = node.querySelector(".delete-button");
 
   title.textContent = record.category;
-  meta.textContent = [record.note || "无备注", getDisplaySource(record)].filter(Boolean).join(" · ");
+  meta.textContent = [getVisibleNote(record.note) || "无备注", getDisplaySource(record)].filter(Boolean).join(" · ");
   amount.textContent = `${record.type === "income" ? "+" : "-"}${money(record.amount)}`;
   amount.className = record.type;
-  date.textContent = record.date;
+  date.textContent = record.time || record.date;
 
   if (options.preview) {
     checkboxWrap.hidden = false;
@@ -473,7 +473,7 @@ function startEditing(id) {
   els.amountInput.value = record.amount;
   els.categoryInput.value = record.category;
   els.dateInput.value = record.date;
-  els.noteInput.value = record.note || "";
+  els.noteInput.value = getVisibleNote(record.note);
   els.saveRecordButton.textContent = "保存修改";
   els.cancelEditButton.hidden = false;
   els.entryForm.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -578,6 +578,7 @@ function addRecordInsideGroup(date, groupName) {
     source: "组内新增",
     groupName,
     isGroupItem: true,
+    time: formatTime(new Date()),
     createdAt: new Date().toISOString(),
   });
   addDayGroup(date, groupName);
@@ -604,6 +605,29 @@ function stripGroupSource(source = "") {
   return parseRemoteSource(source).source || "";
 }
 
+function encodeNoteTime(note = "", time = "") {
+  const visibleNote = getVisibleNote(note);
+  return time ? `[time:${time}]${visibleNote}` : visibleNote;
+}
+
+function parseNoteTime(note = "") {
+  const match = String(note).match(/^\[time:(\d{2}:\d{2})\](.*)$/s);
+  if (!match) return { time: "", note };
+  return { time: match[1], note: match[2] || "" };
+}
+
+function getVisibleNote(note = "") {
+  return parseNoteTime(note).note;
+}
+
+function compareRecordTimeDesc(a, b) {
+  const dateCompare = b.date.localeCompare(a.date);
+  if (dateCompare) return dateCompare;
+  const timeCompare = (b.time || "00:00").localeCompare(a.time || "00:00");
+  if (timeCompare) return timeCompare;
+  return b.createdAt.localeCompare(a.createdAt);
+}
+
 function handleQuickLink() {
   const params = new URLSearchParams(window.location.search);
   if (!params.has("quick")) return;
@@ -617,6 +641,7 @@ function handleQuickLink() {
     date: params.get("date") || formatDate(new Date()),
     note: params.get("note") || "背面轻点",
     source: "快捷指令",
+    time: params.get("time") || formatTime(new Date()),
     createdAt: new Date().toISOString(),
   };
 
@@ -846,10 +871,11 @@ function normalizeExcelDate(value) {
 
   const serial = Number(text);
   if (!Number.isFinite(serial) || serial < 20000 || serial > 80000) return text;
+  const totalMinutes = Math.round((serial - Math.floor(serial)) * 24 * 60);
   const utcDays = Math.floor(serial - 25569);
-  const utcValue = utcDays * 86400;
+  const utcValue = utcDays * 86400 + totalMinutes * 60;
   const date = new Date(utcValue * 1000);
-  return formatDate(date);
+  return `${formatDate(date)} ${formatTime(date)}`;
 }
 
 function decodeBuffer(buffer, encoding) {
@@ -929,7 +955,9 @@ function parseBillText(text) {
 
 function parseRow(row, indexes) {
   const joined = row.join(" ");
-  const date = extractDate(indexes.date != null ? row[indexes.date] : joined);
+  const dateText = indexes.date != null ? row[indexes.date] : joined;
+  const date = extractDate(dateText);
+  const time = extractTime(dateText) || extractTime(joined);
   const amountValue = findAmountValue(row, indexes);
   const amount = normalizeAmount(amountValue);
 
@@ -940,7 +968,7 @@ function parseRow(row, indexes) {
   const note = inferNote(row, indexes);
   const category = inferCategory(`${note} ${typeText}`);
 
-  return { type, amount, category, date, note };
+  return { type, amount, category, date, time, note };
 }
 
 function inferIndexes(header) {
@@ -1010,6 +1038,14 @@ function extractDate(text = "") {
   if (!match) return "";
   const [, year, month, day] = match;
   return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+}
+
+function extractTime(text = "") {
+  const normalized = cleanCell(text);
+  const match = normalized.match(/\b(\d{1,2}):(\d{2})(?::\d{2})?\b/);
+  if (!match) return "";
+  const [, hour, minute] = match;
+  return `${hour.padStart(2, "0")}:${minute}`;
 }
 
 function findAmountValue(row, indexes) {
@@ -1431,13 +1467,16 @@ function normalizeSupabaseKey(value) {
 function normalizeRecord(record) {
   const parsed = parseRemoteSource(record.source || "");
   const groupName = record.groupName || parsed.groupName || "";
+  const parsedNote = parseNoteTime(record.note || "");
+  const time = record.time || parsedNote.time || "";
   return {
     id: record.id,
     type: record.type,
     amount: Number(record.amount),
     category: record.category || "未分类",
     date: record.date,
-    note: record.note || "",
+    note: parsedNote.note || "",
+    time,
     source: parsed.source || record.source || "手动",
     groupName,
     isGroupItem: Boolean(record.isGroupItem || groupName),
@@ -1453,7 +1492,7 @@ function recordToRemote(record) {
     amount: item.amount,
     category: item.category,
     record_date: item.date,
-    note: item.note,
+    note: encodeNoteTime(item.note, item.time),
     source: encodeGroupSource(item),
     created_at: item.createdAt,
   };
@@ -1461,13 +1500,15 @@ function recordToRemote(record) {
 
 function remoteToRecord(row) {
   const parsed = parseRemoteSource(row.source || "云端");
+  const parsedNote = parseNoteTime(row.note || "");
   return {
     id: row.id,
     type: row.type,
     amount: Number(row.amount),
     category: row.category,
     date: row.record_date,
-    note: row.note || "",
+    note: parsedNote.note || "",
+    time: parsedNote.time,
     source: parsed.source || "云端",
     groupName: parsed.groupName,
     isGroupItem: parsed.isGroupItem,
@@ -1478,7 +1519,7 @@ function remoteToRecord(row) {
 function dedupeRecords(records) {
   const seen = new Set();
   return records.filter((record) => {
-    const key = record.id || [record.date, record.type, record.amount, record.category, record.note, record.groupName].join("|");
+    const key = record.id || [record.date, record.time, record.type, record.amount, record.category, record.note, record.groupName].join("|");
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -1502,6 +1543,12 @@ function formatDate(date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function formatTime(date) {
+  const hour = String(date.getHours()).padStart(2, "0");
+  const minute = String(date.getMinutes()).padStart(2, "0");
+  return `${hour}:${minute}`;
 }
 
 function formatMonth(date) {
