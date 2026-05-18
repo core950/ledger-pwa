@@ -611,9 +611,9 @@ function encodeNoteTime(note = "", time = "") {
 }
 
 function parseNoteTime(note = "") {
-  const match = String(note).match(/^\[time:(\d{2}:\d{2})\](.*)$/s);
+  const match = String(note).match(/^\[time:(\d{2}:\d{2}(?::\d{2})?)\](.*)$/s);
   if (!match) return { time: "", note };
-  return { time: match[1], note: match[2] || "" };
+  return { time: normalizeTime(match[1]), note: match[2] || "" };
 }
 
 function getVisibleNote(note = "") {
@@ -623,7 +623,7 @@ function getVisibleNote(note = "") {
 function compareRecordTimeDesc(a, b) {
   const dateCompare = b.date.localeCompare(a.date);
   if (dateCompare) return dateCompare;
-  const timeCompare = (b.time || "00:00").localeCompare(a.time || "00:00");
+  const timeCompare = (normalizeTime(b.time) || "00:00:00").localeCompare(normalizeTime(a.time) || "00:00:00");
   if (timeCompare) return timeCompare;
   return b.createdAt.localeCompare(a.createdAt);
 }
@@ -641,7 +641,7 @@ function handleQuickLink() {
     date: params.get("date") || formatDate(new Date()),
     note: params.get("note") || "背面轻点",
     source: "快捷指令",
-    time: params.get("time") || formatTime(new Date()),
+    time: normalizeTime(params.get("time")) || formatTime(new Date()),
     createdAt: new Date().toISOString(),
   };
 
@@ -871,9 +871,9 @@ function normalizeExcelDate(value) {
 
   const serial = Number(text);
   if (!Number.isFinite(serial) || serial < 20000 || serial > 80000) return text;
-  const totalMinutes = Math.round((serial - Math.floor(serial)) * 24 * 60);
+  const totalSeconds = Math.round((serial - Math.floor(serial)) * 24 * 60 * 60);
   const utcDays = Math.floor(serial - 25569);
-  const utcValue = utcDays * 86400 + totalMinutes * 60;
+  const utcValue = utcDays * 86400 + totalSeconds;
   const date = new Date(utcValue * 1000);
   return `${formatDate(date)} ${formatTime(date)}`;
 }
@@ -1042,10 +1042,10 @@ function extractDate(text = "") {
 
 function extractTime(text = "") {
   const normalized = cleanCell(text);
-  const match = normalized.match(/\b(\d{1,2}):(\d{2})(?::\d{2})?\b/);
+  const match = normalized.match(/\b(\d{1,2}):(\d{2})(?::(\d{2}))?\b/);
   if (!match) return "";
-  const [, hour, minute] = match;
-  return `${hour.padStart(2, "0")}:${minute}`;
+  const [, hour, minute, second = "00"] = match;
+  return normalizeTime(`${hour}:${minute}:${second}`);
 }
 
 function findAmountValue(row, indexes) {
@@ -1468,7 +1468,7 @@ function normalizeRecord(record) {
   const parsed = parseRemoteSource(record.source || "");
   const groupName = record.groupName || parsed.groupName || "";
   const parsedNote = parseNoteTime(record.note || "");
-  const time = record.time || parsedNote.time || "";
+  const time = normalizeTime(record.time || parsedNote.time || "");
   return {
     id: record.id,
     type: record.type,
@@ -1548,7 +1548,15 @@ function formatDate(date) {
 function formatTime(date) {
   const hour = String(date.getHours()).padStart(2, "0");
   const minute = String(date.getMinutes()).padStart(2, "0");
-  return `${hour}:${minute}`;
+  const second = String(date.getSeconds()).padStart(2, "0");
+  return `${hour}:${minute}:${second}`;
+}
+
+function normalizeTime(value = "") {
+  const match = String(value).match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (!match) return "";
+  const [, hour, minute, second = "00"] = match;
+  return `${hour.padStart(2, "0")}:${minute}:${second}`;
 }
 
 function formatMonth(date) {
