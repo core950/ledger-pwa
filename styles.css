@@ -114,7 +114,7 @@ h2 {
 
 .tabs {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   gap: 6px;
   position: fixed;
   left: 50%;
@@ -281,7 +281,8 @@ textarea:focus {
 }
 
 .records,
-.rank-list {
+.rank-list,
+.product-list {
   display: grid;
   gap: 8px;
   padding: 0;
@@ -525,6 +526,73 @@ textarea:focus {
   background: var(--panel);
 }
 
+.product-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.product-card-head,
+.product-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.product-card-head div {
+  min-width: 0;
+}
+
+.product-card-head strong,
+.product-card-head span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.product-card-head span,
+.product-meta {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.product-price {
+  font-size: 20px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.product-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.product-metrics div {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.product-metrics span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.product-metrics strong {
+  display: block;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+
 .secondary-file {
   display: grid;
   place-items: center;
@@ -590,7 +658,7 @@ textarea:focus {
 
   .tab {
     padding: 0 4px;
-    font-size: 13px;
+    font-size: 12px;
   }
 
   .record {
@@ -601,6 +669,17 @@ textarea:focus {
     grid-column: 2 / 3;
     grid-row: 2;
     text-align: left;
+  }
+
+  .product-card-head,
+  .product-card-actions,
+  .product-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .product-card-head,
+  .product-card-actions {
+    display: grid;
   }
 
   .delete-button {

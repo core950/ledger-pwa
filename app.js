@@ -1,12 +1,16 @@
 const STORAGE_KEY = "ink-ledger-records-v1";
 const DAY_GROUPS_KEY = "ink-ledger-day-groups-v1";
+const PRODUCTS_KEY = "ink-ledger-products-v1";
 const CLOUD_CONFIG_KEY = "ink-ledger-cloud-config-v1";
 const CLOUD_SESSION_KEY = "ink-ledger-cloud-session-v1";
 const SYNC_QUEUE_KEY = "ink-ledger-sync-queue-v1";
+const PRODUCT_SOURCE = "商品核算";
+const NON_BILLABLE_SOURCE_PREFIX = "不计入|";
 
 const state = {
   records: loadRecords(),
   dayGroups: loadDayGroups(),
+  products: loadProducts(),
   cloud: loadCloudConfig(),
   session: loadCloudSession(),
   syncQueue: loadSyncQueue(),
@@ -39,6 +43,17 @@ const els = {
   dayExpense: document.querySelector("#dayExpense"),
   dayIncome: document.querySelector("#dayIncome"),
   clearFiltersButton: document.querySelector("#clearFiltersButton"),
+  productForm: document.querySelector("#productForm"),
+  productNameInput: document.querySelector("#productNameInput"),
+  productSourceInput: document.querySelector("#productSourceInput"),
+  productPriceInput: document.querySelector("#productPriceInput"),
+  productSpecAmountInput: document.querySelector("#productSpecAmountInput"),
+  productSpecUnitInput: document.querySelector("#productSpecUnitInput"),
+  productPortionsInput: document.querySelector("#productPortionsInput"),
+  productDateInput: document.querySelector("#productDateInput"),
+  productCategoryInput: document.querySelector("#productCategoryInput"),
+  productList: document.querySelector("#productList"),
+  productEmpty: document.querySelector("#productEmpty"),
   fileInput: document.querySelector("#fileInput"),
   dropzone: document.querySelector("#dropzone"),
   pasteInput: document.querySelector("#pasteInput"),
@@ -86,6 +101,8 @@ function initialize() {
   const today = new Date();
   els.dateInput.value = formatDate(today);
   els.monthInput.value = formatMonth(today);
+  els.productDateInput.value = formatDate(today);
+  els.productCategoryInput.value = "餐饮";
   els.supabaseUrlInput.value = state.cloud.url || "";
   els.supabaseKeyInput.value = state.cloud.anonKey || "";
   bindEvents();
@@ -149,6 +166,7 @@ function bindEvents() {
     renderRecords();
   });
   els.cancelEditButton.addEventListener("click", stopEditing);
+  els.productForm.addEventListener("submit", saveProduct);
 
   els.fileInput.addEventListener("change", async () => {
     const file = els.fileInput.files[0];
@@ -244,9 +262,22 @@ function saveDayGroups() {
   localStorage.setItem(DAY_GROUPS_KEY, JSON.stringify(state.dayGroups));
 }
 
+function loadProducts() {
+  try {
+    return dedupeProducts(JSON.parse(localStorage.getItem(PRODUCTS_KEY)) || []);
+  } catch {
+    return [];
+  }
+}
+
+function saveProducts() {
+  localStorage.setItem(PRODUCTS_KEY, JSON.stringify(state.products));
+}
+
 function render() {
   renderSummary();
   renderRecords();
+  renderProducts();
   renderStats();
   renderSyncStatus();
 }
@@ -592,13 +623,17 @@ function getDisplaySource(record) {
 
 function encodeGroupSource(record) {
   const source = stripGroupSource(record.source || "手动");
-  return record.groupName ? `分组:${record.groupName}|${source}` : source;
+  if (record.groupName) return `分组:${record.groupName}|${source}`;
+  return record.isGroupItem ? `${NON_BILLABLE_SOURCE_PREFIX}${source}` : source;
 }
 
 function parseRemoteSource(source = "") {
   const match = String(source).match(/^分组:([^|]+)\|(.*)$/);
-  if (!match) return { source, groupName: "", isGroupItem: false };
-  return { source: match[2] || "云端", groupName: match[1], isGroupItem: true };
+  if (match) return { source: match[2] || "云端", groupName: match[1], isGroupItem: true };
+  if (String(source).startsWith(NON_BILLABLE_SOURCE_PREFIX)) {
+    return { source: String(source).slice(NON_BILLABLE_SOURCE_PREFIX.length) || "云端", groupName: "", isGroupItem: true };
+  }
+  return { source, groupName: "", isGroupItem: false };
 }
 
 function stripGroupSource(source = "") {
@@ -618,6 +653,125 @@ function parseNoteTime(note = "") {
 
 function getVisibleNote(note = "") {
   return parseNoteTime(note).note;
+}
+
+function saveProduct(event) {
+  event.preventDefault();
+  const product = normalizeProduct({
+    id: crypto.randomUUID(),
+    name: els.productNameInput.value.trim(),
+    source: els.productSourceInput.value.trim(),
+    totalPrice: normalizeAmount(els.productPriceInput.value),
+    specAmount: normalizePositiveNumber(els.productSpecAmountInput.value),
+    specUnit: els.productSpecUnitInput.value.trim(),
+    portions: normalizePositiveNumber(els.productPortionsInput.value),
+    date: els.productDateInput.value || formatDate(new Date()),
+    category: els.productCategoryInput.value.trim() || "未分类",
+    createdAt: new Date().toISOString(),
+  });
+
+  if (!product.source || !product.totalPrice || !product.specAmount || !product.specUnit || !product.portions) return;
+  state.products = dedupeProducts([product, ...state.products]);
+  saveProducts();
+  queueProductUpserts([product]);
+  syncNow({ silent: true });
+  renderProducts();
+  els.productForm.reset();
+  els.productDateInput.value = product.date;
+  els.productCategoryInput.value = product.category;
+  els.productSourceInput.focus();
+}
+
+function renderProducts() {
+  els.productList.replaceChildren(...state.products.map(createProductNode));
+  els.productEmpty.classList.toggle("is-visible", state.products.length === 0);
+}
+
+function createProductNode(product) {
+  const item = document.createElement("li");
+  item.className = "product-card";
+  const metrics = calculateProduct(product);
+  const title = product.name || "未命名商品";
+
+  const head = document.createElement("div");
+  head.className = "product-card-head";
+  const nameBox = document.createElement("div");
+  const name = document.createElement("strong");
+  name.textContent = title;
+  const source = document.createElement("span");
+  source.textContent = product.source;
+  nameBox.replaceChildren(name, source);
+  const price = document.createElement("b");
+  price.className = "product-price";
+  price.textContent = money(product.totalPrice);
+  head.replaceChildren(nameBox, price);
+
+  const metricBox = document.createElement("div");
+  metricBox.className = "product-metrics";
+  metricBox.replaceChildren(
+    createMetricNode(`每${product.specUnit}`, money(metrics.unitPrice)),
+    createMetricNode("每份", money(metrics.portionPrice)),
+  );
+
+  const meta = document.createElement("p");
+  meta.className = "product-meta";
+  meta.textContent = `${formatNumber(product.specAmount)}${product.specUnit} · ${formatNumber(product.portions)}份 · 填入 ${product.date} / ${product.category}`;
+
+  const actions = document.createElement("div");
+  actions.className = "product-card-actions";
+  const addButton = document.createElement("button");
+  addButton.type = "button";
+  addButton.className = "primary";
+  addButton.textContent = "填入每日";
+  addButton.addEventListener("click", () => addProductToDaily(product.id));
+  const deleteButton = document.createElement("button");
+  deleteButton.type = "button";
+  deleteButton.className = "danger";
+  deleteButton.textContent = "删除";
+  deleteButton.addEventListener("click", () => deleteProduct(product.id));
+  actions.replaceChildren(addButton, deleteButton);
+
+  item.replaceChildren(head, metricBox, meta, actions);
+  return item;
+}
+
+function createMetricNode(label, value) {
+  const node = document.createElement("div");
+  const name = document.createElement("span");
+  name.textContent = label;
+  const amount = document.createElement("strong");
+  amount.textContent = value;
+  node.replaceChildren(name, amount);
+  return node;
+}
+
+function addProductToDaily(id) {
+  const product = state.products.find((item) => item.id === id);
+  if (!product) return;
+  const metrics = calculateProduct(product);
+  const record = normalizeRecord({
+    id: crypto.randomUUID(),
+    type: "expense",
+    amount: metrics.portionPrice,
+    category: product.category,
+    date: product.date,
+    note: `${product.name || "商品"}｜${product.source}｜总价${money(product.totalPrice)}｜${formatNumber(product.specAmount)}${product.specUnit}｜${formatNumber(product.portions)}份`,
+    source: PRODUCT_SOURCE,
+    isGroupItem: true,
+    time: formatTime(new Date()),
+    createdAt: new Date().toISOString(),
+  });
+  addRecords([record], { sync: true });
+  switchView("records");
+}
+
+function deleteProduct(id) {
+  if (!confirm("删除这条商品核算？")) return;
+  state.products = state.products.filter((product) => product.id !== id);
+  saveProducts();
+  queueDelete(id);
+  syncNow({ silent: true });
+  renderProducts();
 }
 
 function compareRecordTimeDesc(a, b) {
@@ -1095,6 +1249,11 @@ function normalizeAmount(value = "") {
   return cleaned ? Math.abs(Number(cleaned[0])) : 0;
 }
 
+function normalizePositiveNumber(value = "") {
+  const match = String(value).replace(/,/g, "").match(/\d+(?:\.\d+)?/);
+  return match ? Math.abs(Number(match[0])) : 0;
+}
+
 function detectDelimiter(lines) {
   const sample = lines.slice(0, 30).join("\n");
   const candidates = [",", "\t", ";", "|"];
@@ -1178,7 +1337,7 @@ function renderStats() {
 }
 
 function exportBackup() {
-  const blob = new Blob([JSON.stringify({ records: state.records, dayGroups: state.dayGroups }, null, 2)], {
+  const blob = new Blob([JSON.stringify({ records: state.records, dayGroups: state.dayGroups, products: state.products }, null, 2)], {
     type: "application/json",
   });
   const link = document.createElement("a");
@@ -1195,9 +1354,12 @@ async function importBackup() {
   if (!Array.isArray(data.records)) return;
   state.records = dedupeRecords([...data.records, ...state.records]);
   state.dayGroups = { ...state.dayGroups, ...(data.dayGroups || {}) };
+  state.products = dedupeProducts([...(data.products || []), ...state.products]);
   saveDayGroups();
   saveRecords();
+  saveProducts();
   queueUpserts(state.records);
+  queueProductUpserts(state.products);
   syncNow({ silent: true });
   render();
 }
@@ -1206,8 +1368,10 @@ function wipeData() {
   if (!confirm("确定清空本地所有记账数据？云端数据不会自动清空。")) return;
   state.records = [];
   state.dayGroups = {};
+  state.products = [];
   saveRecords();
   saveDayGroups();
+  saveProducts();
   render();
 }
 
@@ -1278,10 +1442,18 @@ async function handleSyncClick(event) {
 
 function loadSyncQueue() {
   try {
-    return JSON.parse(localStorage.getItem(SYNC_QUEUE_KEY)) || { upserts: [], deletes: [] };
+    return normalizeSyncQueue(JSON.parse(localStorage.getItem(SYNC_QUEUE_KEY)));
   } catch {
-    return { upserts: [], deletes: [] };
+    return normalizeSyncQueue();
   }
+}
+
+function normalizeSyncQueue(queue = {}) {
+  return {
+    upserts: queue.upserts || [],
+    productUpserts: queue.productUpserts || [],
+    deletes: queue.deletes || [],
+  };
 }
 
 function saveSyncQueue() {
@@ -1296,8 +1468,17 @@ function queueUpserts(records) {
   saveSyncQueue();
 }
 
+function queueProductUpserts(products) {
+  const byId = new Map((state.syncQueue.productUpserts || []).map((product) => [product.id, product]));
+  products.forEach((product) => byId.set(product.id, normalizeProduct(product)));
+  state.syncQueue.productUpserts = [...byId.values()];
+  state.syncQueue.deletes = state.syncQueue.deletes.filter((id) => !byId.has(id));
+  saveSyncQueue();
+}
+
 function queueDelete(id) {
   state.syncQueue.upserts = state.syncQueue.upserts.filter((record) => record.id !== id);
+  state.syncQueue.productUpserts = (state.syncQueue.productUpserts || []).filter((product) => product.id !== id);
   if (!state.syncQueue.deletes.includes(id)) state.syncQueue.deletes.push(id);
   saveSyncQueue();
 }
@@ -1352,14 +1533,16 @@ async function syncNow(options = {}) {
 }
 
 async function flushUpserts() {
-  if (!state.syncQueue.upserts.length) return;
-  const rows = state.syncQueue.upserts.map(recordToRemote);
+  const productUpserts = state.syncQueue.productUpserts || [];
+  if (!state.syncQueue.upserts.length && !productUpserts.length) return;
+  const rows = [...state.syncQueue.upserts.map(recordToRemote), ...productUpserts.map(productToRemote)];
   await supabaseFetch("/rest/v1/ledger_records?on_conflict=id", {
     method: "POST",
     body: rows,
     prefer: "resolution=merge-duplicates",
   });
   state.syncQueue.upserts = [];
+  state.syncQueue.productUpserts = [];
   saveSyncQueue();
 }
 
@@ -1381,9 +1564,20 @@ async function pullCloudRecords() {
   const rows = await supabaseFetch("/rest/v1/ledger_records?select=*&order=record_date.desc,created_at.desc", {
     method: "GET",
   });
-  const remoteRecords = rows.map(remoteToRecord);
+  const remoteRecords = [];
+  const remoteProducts = [];
+  rows.forEach((row) => {
+    const product = remoteToProduct(row);
+    if (product) {
+      remoteProducts.push(product);
+    } else {
+      remoteRecords.push(remoteToRecord(row));
+    }
+  });
   state.records = dedupeRecords([...remoteRecords, ...state.records]);
+  state.products = dedupeProducts([...remoteProducts, ...state.products]);
   saveRecords();
+  saveProducts();
   render();
 }
 
@@ -1429,7 +1623,7 @@ function isCloudReady() {
 
 function renderSyncStatus() {
   if (els.syncStatus.dataset.pinned === "true") return;
-  const queued = state.syncQueue.upserts.length + state.syncQueue.deletes.length;
+  const queued = state.syncQueue.upserts.length + (state.syncQueue.productUpserts || []).length + state.syncQueue.deletes.length;
   if (isCloudReady()) {
     setSyncStatus(`已连接云同步。待同步 ${queued} 条。`, queued ? "" : "ok", false);
   } else if (state.cloud.url && state.cloud.anonKey) {
@@ -1499,6 +1693,29 @@ function normalizeRecord(record) {
   };
 }
 
+function normalizeProduct(product) {
+  return {
+    id: product.id,
+    name: product.name || "",
+    source: product.source || "未知来源",
+    totalPrice: Number(product.totalPrice || product.price || 0),
+    specAmount: Number(product.specAmount || 0),
+    specUnit: product.specUnit || "份",
+    portions: Number(product.portions || 1),
+    date: product.date || formatDate(new Date()),
+    category: product.category || "未分类",
+    createdAt: product.createdAt || new Date().toISOString(),
+  };
+}
+
+function calculateProduct(product) {
+  const item = normalizeProduct(product);
+  return {
+    unitPrice: item.specAmount ? item.totalPrice / item.specAmount : 0,
+    portionPrice: item.portions ? item.totalPrice / item.portions : 0,
+  };
+}
+
 function recordToRemote(record) {
   const item = normalizeRecord(record);
   return {
@@ -1509,6 +1726,20 @@ function recordToRemote(record) {
     record_date: item.date,
     note: encodeNoteTime(item.note, item.time),
     source: encodeGroupSource(item),
+    created_at: item.createdAt,
+  };
+}
+
+function productToRemote(product) {
+  const item = normalizeProduct(product);
+  return {
+    id: item.id,
+    type: "expense",
+    amount: item.totalPrice,
+    category: PRODUCT_SOURCE,
+    record_date: item.date,
+    note: encodeProductNote(item),
+    source: PRODUCT_SOURCE,
     created_at: item.createdAt,
   };
 }
@@ -1531,12 +1762,36 @@ function remoteToRecord(row) {
   };
 }
 
+function remoteToProduct(row) {
+  if (row.source !== PRODUCT_SOURCE) return null;
+  const match = String(row.note || "").match(/^\[product:([\s\S]+)\]$/);
+  if (!match) return null;
+  try {
+    return normalizeProduct(JSON.parse(decodeURIComponent(match[1])));
+  } catch {
+    return null;
+  }
+}
+
+function encodeProductNote(product) {
+  return `[product:${encodeURIComponent(JSON.stringify(normalizeProduct(product)))}]`;
+}
+
 function dedupeRecords(records) {
   const seen = new Set();
   return records.filter((record) => {
     const key = record.id || [record.date, record.time, record.type, record.amount, record.category, record.note, record.groupName].join("|");
     if (seen.has(key)) return false;
     seen.add(key);
+    return true;
+  });
+}
+
+function dedupeProducts(products) {
+  const seen = new Set();
+  return products.map(normalizeProduct).filter((product) => {
+    if (!product.id || seen.has(product.id)) return false;
+    seen.add(product.id);
     return true;
   });
 }
@@ -1551,6 +1806,12 @@ function money(value) {
     currency: "CNY",
     minimumFractionDigits: 2,
   }).format(value);
+}
+
+function formatNumber(value) {
+  return new Intl.NumberFormat("zh-CN", {
+    maximumFractionDigits: 4,
+  }).format(Number(value || 0));
 }
 
 function formatDate(date) {

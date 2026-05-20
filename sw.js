@@ -1,5 +1,5 @@
-const CACHE_NAME = "ink-ledger-v16";
-const ASSETS = ["./", "index.html", "styles.css?v=16", "app.js?v=16", "manifest.webmanifest", "icon.svg", "reset.html"];
+const CACHE_NAME = "ink-ledger-v17";
+const ASSETS = ["./", "index.html", "styles.css?v=17", "app.js?v=17", "manifest.webmanifest", "icon.svg", "reset.html"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
